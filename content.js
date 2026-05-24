@@ -2245,6 +2245,38 @@
   }
 
   // --- STATS UTILS ---
+  function calculateATR(candles, period = 14) {
+    const len = candles.length;
+    const atr = new Array(len).fill(0);
+    if (len === 0) return atr;
+
+    const tr = new Array(len).fill(0);
+    tr[0] = candles[0].high - candles[0].low;
+
+    for (let i = 1; i < len; i++) {
+      const h = candles[i].high;
+      const l = candles[i].low;
+      const pc = candles[i - 1].close;
+      tr[i] = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+    }
+
+    let sum = 0;
+    const limit = Math.min(len, period);
+    for (let i = 0; i < limit; i++) {
+      sum += tr[i];
+    }
+    const initialAtr = sum / limit;
+    for (let i = 0; i < limit; i++) {
+      atr[i] = initialAtr;
+    }
+
+    for (let i = period; i < len; i++) {
+      atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
+    }
+
+    return atr;
+  }
+
   function calculateEMA(data, period) {
     const k = 2 / (period + 1);
     const ema = [data[0]];
