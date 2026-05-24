@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Antigravity Advisor</title>
+  <style>
+    :root {
+      --bg: #0b0e11;
+      --card-bg: #181a20;
+      --card-bg2: #1e2329;
+      --border: #2b3139;
+      --accent: #f0b90b;
+      --accent-hover: #fcd535;
+      --text: #eaecef;
+      --text-muted: #848e9c;
+      --green: #2ebd85;
+      --red: #f6465d;
+      --blue: #1e90ff;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      width: 380px;
+      padding: 14px;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+    }
+    .logo {
+      width: 28px; height: 28px;
+      background: var(--accent);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: bold; color: var(--bg); font-size: 15px;
+      flex-shrink: 0;
+    }
+    .title { font-size: 15px; font-weight: 700; letter-spacing: 0.4px; }
+    .subtitle { font-size: 9px; color: var(--accent); text-transform: uppercase; font-weight: 700; letter-spacing: 1px; margin-top: 2px; }
+
+    /* Live status badge */
+    .live-badge {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 5px;
+      font-size: 9px; font-weight: 700; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.6px;
+    }
+    .live-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--text-muted);
+    }
+    .live-dot.synced {
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: pulse-dot 2s infinite alternate;
+    }
+    @keyframes pulse-dot {
+      from { box-shadow: 0 0 3px var(--green); }
+      to   { box-shadow: 0 0 10px var(--green); }
+    }
+
+    /* ── Sections ── */
+    .section {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+    .section-title {
+      font-size: 10px; text-transform: uppercase; color: var(--text-muted);
+      font-weight: 700; margin-bottom: 10px; letter-spacing: 0.8px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .section-title .badge {
+      font-size: 8px; padding: 1px 5px; border-radius: 10px;
+      background: rgba(240,185,11,0.15); color: var(--accent);
+      border: 1px solid rgba(240,185,11,0.3); font-weight: 800;
+    }
+
+    /* ── Active Trade Panel ── */
+    #activeTradePanelWrap { display: none; }
+    #activeTradePanelWrap.visible { display: block; }
+
+    .active-trade-panel {
+      background: linear-gradient(135deg, rgba(46,189,133,0.08), rgba(11,14,17,0));
+      border: 1px solid rgba(46,189,133,0.35);
+      border-radius: 8px; padding: 12px; margin-bottom: 10px;
+    }
+    .active-trade-panel.short {
+      background: linear-gradient(135deg, rgba(246,70,93,0.08), rgba(11,14,17,0));
+      border-color: rgba(246,70,93,0.35);
+    }
+    .atp-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+    }
+    .atp-badge {
+      font-size: 9px; font-weight: 800; padding: 2px 7px; border-radius: 10px;
+      text-transform: uppercase; letter-spacing: 0.8px;
+    }
+    .atp-badge.long  { background: rgba(46,189,133,0.2); color: var(--green); border: 1px solid rgba(46,189,133,0.4); }
+    .atp-badge.short { background: rgba(246,70,93,0.2);  color: var(--red);   border: 1px solid rgba(246,70,93,0.4); }
+    .atp-title { font-size: 11px; font-weight: 700; color: var(--text); }
+    .atp-mode  { font-size: 9px; color: var(--text-muted); margin-left: auto; font-weight: 600; }
+
+    .atp-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    }
+    .atp-cell {
+      background: rgba(11,14,17,0.5); border: 1px solid var(--border);
+      border-radius: 5px; padding: 7px 8px;
+    }
+    .atp-label { font-size: 8px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+    .atp-val   { font-size: 12px; font-weight: 800; font-family: monospace; }
+
+    .pnl-row {
+      margin-top: 8px;
+      background: rgba(11,14,17,0.5); border: 1px solid var(--border);
+      border-radius: 5px; padding: 8px 10px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .pnl-label { font-size: 9px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .pnl-val   { font-size: 16px; font-weight: 900; font-family: monospace; }
+
+    /* ── Stats Grid ── */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+      margin-bottom: 10px;
+    }
+    .stat-card {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 5px; padding: 8px 4px; text-align: center;
+    }
+    .stat-label { font-size: 8px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; letter-spacing: 0.4px; }
+    .stat-value { font-size: 14px; font-weight: 800; }
+
+    /* Score breakdown bar */
+    .score-bar-wrap { margin-top: 8px; }
+    .score-bar-label { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-muted); margin-bottom: 3px; }
+    .score-bar-track { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .score-bar-fill  { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+
+    /* ── Session Badge ── */
+    .session-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 10px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+      margin-bottom: 8px;
+    }
+    .session-name { font-size: 10px; font-weight: 700; }
+    .session-status {
+      font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 10px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .session-status.active   { background: rgba(46,189,133,0.15); color: var(--green); border: 1px solid rgba(46,189,133,0.3); }
+    .session-status.inactive { background: rgba(132,142,156,0.1);  color: var(--text-muted); border: 1px solid var(--border); }
+    .session-status.dead     { background: rgba(246,70,93,0.1);    color: var(--red);   border: 1px solid rgba(246,70,93,0.3); }
+
+    /* ── Settings ── */
+    .form-group { margin-bottom: 10px; }
+    .form-group:last-child { margin-bottom: 0; }
+    label {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12px; margin-bottom: 6px; color: var(--text);
+    }
+    label span { color: var(--accent); font-weight: 600; }
+    input[type="range"] { width: 100%; accent-color: var(--accent); margin: 6px 0; }
+    select, input[type="number"] {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text); padding: 7px 8px;
+      font-size: 12px; outline: none;
+    }
+    select:focus, input[type="number"]:focus { border-color: var(--accent); }
+
+    .toggle-group {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 8px;
+    }
+    .toggle-group:last-child { margin-bottom: 0; }
+    .toggle-label { font-size: 12px; }
+    .switch { position: relative; display: inline-block; width: 34px; height: 20px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background: #393e46; transition: .3s; border-radius: 20px;
+    }
+    .slider:before {
+      position: absolute; content: ""; height: 14px; width: 14px;
+      left: 3px; bottom: 3px; background: white; transition: .3s; border-radius: 50%;
+    }
+    input:checked + .slider { background: var(--accent); }
+    input:checked + .slider:before { transform: translateX(14px); }
+
+    /* ── Buttons ── */
+    .btn-row { display: flex; gap: 8px; margin-top: 4px; }
+    .save-btn {
+      flex: 2; background: var(--accent); color: var(--bg); border: none;
+      border-radius: 5px; padding: 10px; font-size: 11px; font-weight: 700;
+      cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px;
+      transition: background 0.2s;
+    }
+    .save-btn:hover { background: var(--accent-hover); }
+    .clear-btn {
+      flex: 1; background: transparent; color: var(--text-muted);
+      border: 1px solid var(--border); border-radius: 5px; padding: 10px;
+      font-size: 11px; font-weight: 700; cursor: pointer; text-transform: uppercase;
+      transition: all 0.2s;
+    }
+    .clear-btn:hover { border-color: var(--red); color: var(--red); }
+
+    .status-msg {
+      text-align: center; font-size: 11px; color: var(--green);
+      margin-top: 8px; height: 14px; font-weight: 600;
+    }
+
+    /* ── Divider ── */
+    .divider { height: 1px; background: var(--border); margin: 2px 0 10px; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">⚡</div>
+    <div>
+      <div class="title">Antigravity Advisor</div>
+      <div class="subtitle">Binance Futures · SMC HUD <span id="popup-version-label"></span></div>
+    </div>
+    <div class="live-badge">
+      <div class="live-dot synced" id="syncDot"></div>
+      <span id="syncLabel">Live</span>
+    </div>
+  </div>
+
+  <!-- ── Active Trade Panel (shown only when trade is live) ── -->
+  <div id="activeTradePanelWrap">
+    <div class="active-trade-panel" id="activeTradePanel">
+      <div class="atp-header">
+        <span class="atp-badge long" id="atpBadge">LONG</span>
+        <span class="atp-title" id="atpSymbol">BTCUSDT</span>
+        <span class="atp-mode" id="atpMode">MONITORING</span>
+      </div>
+      <div class="atp-grid">
+        <div class="atp-cell">
+          <div class="atp-label">Entry</div>
+          <div class="atp-val" id="atpEntry">—</div>
+        </div>
+        <div class="atp-cell">
+          <div class="atp-label">Target (TP1)</div>
+          <div class="atp-val" style="color: var(--green);" id="atpTarget">—</div>
+        </div>
+        <div class="atp-cell">
+          <div class="atp-label">Stop Loss</div>
+          <div class="atp-val" style="color: var(--red);" id="atpStop">—</div>
+        </div>
+        <div class="atp-cell">
+          <div class="atp-label">Age (Candles)</div>
+          <div class="atp-val" id="atpAge">—</div>
+        </div>
+        <div class="atp-cell">
+          <div class="atp-label">Margin Ratio (%)</div>
+          <div class="atp-val" id="atpMarginRatio">—</div>
+        </div>
+        <div class="atp-cell">
+          <div class="atp-label">Liq. Price ($)</div>
+          <div class="atp-val" id="atpLiqPrice">—</div>
+        </div>
+      </div>
+      <div class="pnl-row">
+        <span class="pnl-label">Unrealized PnL</span>
+        <span class="pnl-val" id="atpPnl">Waiting for tick...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Performance Journal ── -->
+  <div class="section">
+    <div class="section-title" id="journalTitle">
+      Performance Journal
+      <span id="journalWalletBalance" style="font-size: 11px; color: var(--accent); margin-left: 10px; font-weight: bold;"></span>
+      <span class="badge" id="totalTradeBadge">0 Trades</span>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Wins</div>
+        <div class="stat-value" id="statsWins" style="color: var(--green);">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Losses</div>
+        <div class="stat-value" id="statsLosses" style="color: var(--red);">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Timeouts</div>
+        <div class="stat-value" id="statsTimeouts" style="color: var(--text-muted);">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Win Rate</div>
+        <div class="stat-value" id="statsWinrate">0%</div>
+      </div>
+    </div>
+
+    <!-- Win rate bar -->
+    <div class="score-bar-wrap">
+      <div class="score-bar-label">
+        <span>Win Rate</span>
+        <span id="winRateBarLabel">0%</span>
+      </div>
+      <div class="score-bar-track">
+        <div class="score-bar-fill" id="winRateBar" style="width: 0%; background: var(--green);"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Market Session Status ── -->
+  <div class="section">
+    <div class="section-title">
+      Market Session
+      <span class="badge" id="istClock" style="font-family:monospace; letter-spacing:0.5px;">IST --:--</span>
+    </div>
+    <div class="session-row">
+      <span class="session-name">
+        🇬🇧 London
+        <small style="color:var(--text-muted); font-size:10px; display:block;">13:30–15:30 IST core · 18:30 overlap</small>
+      </span>
+      <span class="session-status" id="sessLondon">Checking...</span>
+    </div>
+    <div class="session-row">
+      <span class="session-name">
+        🇺🇸 New York
+        <small style="color:var(--text-muted); font-size:10px; display:block;">18:30–19:30 overlap · 19:30–22:30 active</small>
+      </span>
+      <span class="session-status" id="sessNY">Checking...</span>
+    </div>
+    <div class="session-row" style="margin-bottom:0;">
+      <span class="session-name">
+        🌏 Asia
+        <small style="color:var(--text-muted); font-size:10px; display:block;">07:30–09:30 IST Tokyo · Dead: 09:30–12:30</small>
+      </span>
+      <span class="session-status" id="sessAsia">Checking...</span>
+    </div>
+  </div>
+
+
+  <!-- ── Settings ── -->
+  <div class="section">
+    <div class="section-title">Simulation Mode</div>
+    <div class="toggle-group">
+      <span class="toggle-label" style="font-weight:700; color: var(--blue);">🧪 Simulation Mode</span>
+      <label class="switch"><input type="checkbox" id="enableSandbox"><span class="slider"></span></label>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Risk Management</div>
+    <div class="form-group" id="group-risk-amount">
+      <label for="riskAmount">Account Risk Size ($): <span id="riskVal">$20</span></label>
+      <input type="range" id="riskAmount" min="5" max="200" step="5" value="20">
+    </div>
+    <div class="form-group" id="group-trade-capital" style="display: none;">
+      <label for="tradeCapital">Trade Capital ($): <span id="capitalVal">$100</span></label>
+      <input type="range" id="tradeCapital" min="10" max="2000" step="10" value="100">
+    </div>
+    <div class="form-group">
+      <label for="leverage">Default Leverage: <span id="levVal">3x</span></label>
+      <input type="range" id="leverage" min="1" max="20" step="1" value="3">
+    </div>
+    <div class="form-group">
+      <label for="sizeMode">Trade Sizing Mode</label>
+      <select id="sizeMode">
+        <option value="RISK">Risk-Based Size</option>
+        <option value="CAPITAL">Capital-Based Size</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="targetMode">Target Mode</label>
+      <select id="targetMode">
+        <option value="INDICATOR">SMC / Structure Targets</option>
+        <option value="CUSTOM">Fixed Percentage Targets</option>
+      </select>
+    </div>
+    <div id="group-custom-targets" style="display: none;">
+      <div class="form-group">
+        <label for="customTp">Take Profit (%)</label>
+        <input type="number" id="customTp" min="0.1" max="100" step="0.1" value="2.0">
+      </div>
+      <div class="form-group">
+        <label for="customSl">Stop Loss (%)</label>
+        <input type="number" id="customSl" min="0.1" max="100" step="0.1" value="1.0">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="marginMode">Margin Mode</label>
+      <select id="marginMode">
+        <option value="ISOLATED">Isolated Margin</option>
+        <option value="CROSS">Cross Margin</option>
+      </select>
+    </div>
+    <div class="form-group" id="group-wallet-balance" style="display: none;">
+      <label for="walletBalanceRange">Account Wallet Balance ($): <span id="walletBalanceVal">$1000</span></label>
+      <input type="range" id="walletBalanceRange" min="100" max="10000" step="50" value="1000">
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Advisor Strategy Settings</div>
+    <div class="toggle-group">
+      <span class="toggle-label">Smart Money Concepts (SMC)</span>
+      <label class="switch"><input type="checkbox" id="enableSMC" checked><span class="slider"></span></label>
+    </div>
+    <div class="toggle-group">
+      <span class="toggle-label">RSI / EMA Confirmation</span>
+      <label class="switch"><input type="checkbox" id="enableTechnical" checked><span class="slider"></span></label>
+    </div>
+    <div class="toggle-group">
+      <span class="toggle-label">Audio TTS Alerts</span>
+      <label class="switch"><input type="checkbox" id="enableAudio" checked><span class="slider"></span></label>
+    </div>
+    <div class="toggle-group">
+      <span class="toggle-label" style="font-weight:700; color: var(--accent);">🤖 Auto-Pilot Bot</span>
+      <label class="switch"><input type="checkbox" id="enableAutoPilot"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-group">
+      <span class="toggle-label" style="font-weight:700; color: var(--red);">🛡️ Circuit Breaker (Bot Safety)</span>
+      <label class="switch"><input type="checkbox" id="enableCircuitBreaker" checked><span class="slider"></span></label>
+    </div>
+    <div class="toggle-group">
+      <span class="toggle-label">Enable Candle Timeout</span>
+      <label class="switch"><input type="checkbox" id="enableTimeout" checked><span class="slider"></span></label>
+    </div>
+    <div class="form-group" id="group-timeout-candles" style="margin-top:10px;">
+      <label for="timeoutCandles">Timeout Candles</label>
+      <input type="number" id="timeoutCandles" min="1" max="100" step="1" value="12">
+    </div>
+    <div class="form-group" style="margin-top:10px;">
+      <label for="timeframe">Analysis Timeframe</label>
+      <select id="timeframe">
+        <option value="5m">5 Minute (Recommended)</option>
+        <option value="15m">15 Minute</option>
+        <option value="1m">1 Minute (Highly Volatile)</option>
+      </select>
+    </div>
+  </div>
+
+  <button id="openDashboardBtn" style="width: 100%; margin-top: 10px; margin-bottom: 4px; padding: 10px; background: rgba(30, 144, 255, 0.15); border: 1px solid var(--blue); color: var(--blue); border-radius: 5px; font-size: 11px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s; box-sizing: border-box;">
+    🖥️ Open Master Dashboard
+  </button>
+
+  <div class="btn-row">
+    <button class="save-btn" id="saveBtn">Apply Configurations</button>
+    <button class="clear-btn" id="clearBtn" title="Reset Trade History">Clear</button>
+  </div>
+  <div class="status-msg" id="statusMsg"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

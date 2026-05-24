@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Binance Futures Real-Time Advisor",
+  "version": "1.0.8",
+  "description": "Real-time SMC & indicator-based trading HUD overlay for Binance Futures (USDⓈ-M). Zero-GPU, ultra-low latency.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://*.binance.com/*",
+    "https://fapi.binance.com/*",
+    "https://api.binance.com/*",
+    "http://localhost:4000/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.binance.com/en/futures/*",
+        "https://*.binance.com/zh-CN/futures/*",
+        "https://*.binance.com/futures/*"
+      ],
+      "js": ["content.js"],
+      "css": ["hud.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["hud.css"],
+      "matches": ["https://*.binance.com/*"]
+    }
+  ]
+}

@@ -1,0 +1,460 @@
+/* Antigravity Advisor HUD Injected Styling */
+
+#antigravity-hud-root {
+  all: initial; /* Reset browser styles */
+  position: fixed;
+  top: 70px;
+  right: 20px;
+  width: 400px;
+  background: rgba(11, 14, 17, 0.85) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(240, 185, 11, 0.25) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 15px rgba(240, 185, 11, 0.1) !important;
+  color: #eaecef !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, sans-serif !important;
+  z-index: 9999999 !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  overflow: hidden !important;
+}
+
+#antigravity-hud-root.minimized {
+  width: 48px !important;
+  height: 48px !important;
+  border-radius: 50% !important;
+  top: 70px !important;
+  right: 20px !important;
+  cursor: pointer !important;
+  background: rgba(240, 185, 11, 0.9) !important;
+  box-shadow: 0 0 20px rgba(240, 185, 11, 0.4) !important;
+  border: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Header */
+.agy-header {
+  padding: 12px 14px !important;
+  background: rgba(24, 26, 32, 0.4) !important;
+  border-bottom: 1px solid rgba(43, 49, 57, 0.5) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  cursor: move !important;
+}
+
+.agy-title-container {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.agy-logo {
+  font-size: 14px !important;
+  background: #f0b90b !important;
+  color: #0b0e11 !important;
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 4px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-weight: bold !important;
+}
+
+.agy-text-title {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px !important;
+  color: #fff !important;
+  margin: 0 !important;
+}
+
+.agy-active-pair {
+  font-size: 10px !important;
+  color: #f0b90b !important;
+  background: rgba(240, 185, 11, 0.1) !important;
+  border: 1px solid rgba(240, 185, 11, 0.2) !important;
+  padding: 1px 4px !important;
+  border-radius: 3px !important;
+  font-weight: bold !important;
+}
+
+.agy-mode-badge {
+  font-size: 8px !important;
+  font-weight: 800 !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  text-transform: uppercase !important;
+  display: inline-block !important;
+  letter-spacing: 0.5px !important;
+}
+
+.agy-mode-badge.hunting {
+  background: rgba(46, 189, 133, 0.15) !important;
+  color: #2ebd85 !important;
+  border: 1px solid rgba(46, 189, 133, 0.3) !important;
+  box-shadow: 0 0 8px rgba(46, 189, 133, 0.2) !important;
+}
+
+.agy-mode-badge.monitoring {
+  background: rgba(240, 185, 11, 0.15) !important;
+  color: #f0b90b !important;
+  border: 1px solid rgba(240, 185, 11, 0.3) !important;
+  box-shadow: 0 0 8px rgba(240, 185, 11, 0.2) !important;
+}
+
+.agy-auto-badge {
+  font-size: 8px !important;
+  font-weight: 800 !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  text-transform: uppercase !important;
+  display: inline-block !important;
+  margin-left: 6px !important;
+  letter-spacing: 0.5px !important;
+  transition: all 0.2s ease !important;
+}
+
+.agy-auto-badge.auto-off {
+  background: rgba(132, 142, 156, 0.1) !important;
+  color: #848e9c !important;
+  border: 1px solid rgba(132, 142, 156, 0.2) !important;
+}
+
+.agy-auto-badge.auto-off:hover {
+  background: rgba(240, 185, 11, 0.15) !important;
+  color: #f0b90b !important;
+  border-color: rgba(240, 185, 11, 0.3) !important;
+}
+
+.agy-auto-badge.auto-on {
+  background: rgba(240, 185, 11, 0.2) !important;
+  color: #f0b90b !important;
+  border: 1px solid rgba(240, 185, 11, 0.4) !important;
+  box-shadow: 0 0 10px rgba(240, 185, 11, 0.3) !important;
+  animation: agy-auto-pulse 1.5s infinite alternate !important;
+}
+
+@keyframes agy-auto-pulse {
+  from { box-shadow: 0 0 4px rgba(240, 185, 11, 0.2); }
+  to { box-shadow: 0 0 12px rgba(240, 185, 11, 0.5); }
+}
+
+.agy-controls {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+.agy-btn {
+  background: transparent !important;
+  border: none !important;
+  color: #848e9c !important;
+  cursor: pointer !important;
+  padding: 2px !important;
+  font-size: 14px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: color 0.2s !important;
+}
+
+.agy-btn:hover {
+  color: #fff !important;
+}
+
+/* Body Container */
+.agy-body {
+  padding: 14px !important;
+  box-sizing: border-box !important;
+}
+
+/* Gauge Meter */
+.agy-gauge-section {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  margin-bottom: 16px !important;
+}
+
+.agy-gauge-wrapper {
+  position: relative !important;
+  width: 120px !important;
+  height: 60px !important;
+  overflow: hidden !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+
+.agy-gauge-bg {
+  width: 120px !important;
+  height: 120px !important;
+  border-radius: 50% !important;
+  border: 8px solid #2b3139 !important;
+  box-sizing: border-box !important;
+}
+
+.agy-gauge-fill {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 120px !important;
+  height: 120px !important;
+  border-radius: 50% !important;
+  border: 8px solid transparent !important;
+  border-left-color: #2ebd85 !important;
+  border-bottom-color: #2ebd85 !important;
+  box-sizing: border-box !important;
+  transform: rotate(-45deg) !important; /* -45deg is 0%, 135deg is 100% */
+  transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.agy-gauge-value {
+  position: absolute !important;
+  bottom: 0 !important;
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  color: #fff !important;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.2) !important;
+}
+
+.agy-gauge-label {
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  margin-top: 4px !important;
+  color: #848e9c !important;
+}
+
+/* Indicators Grid */
+.agy-indicator-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 8px !important;
+  margin-bottom: 16px !important;
+}
+
+.agy-ind-card {
+  background: rgba(24, 26, 32, 0.5) !important;
+  border: 1px solid rgba(43, 49, 57, 0.6) !important;
+  border-radius: 6px !important;
+  padding: 8px !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.agy-ind-name {
+  font-size: 9px !important;
+  color: #848e9c !important;
+  text-transform: uppercase !important;
+  font-weight: bold !important;
+  margin-bottom: 4px !important;
+}
+
+.agy-ind-val {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+
+.agy-dot {
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 50% !important;
+  display: inline-block !important;
+  box-shadow: 0 0 6px currentColor !important;
+}
+
+/* Trade Suggestion Card */
+.agy-trade-box {
+  background: rgba(240, 185, 11, 0.04) !important;
+  border: 1px solid rgba(240, 185, 11, 0.2) !important;
+  border-radius: 8px !important;
+  padding: 12px !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.agy-trade-box.bullish {
+  background: rgba(46, 189, 133, 0.04) !important;
+  border-color: rgba(46, 189, 133, 0.2) !important;
+}
+
+.agy-trade-box.bearish {
+  background: rgba(246, 70, 93, 0.04) !important;
+  border-color: rgba(246, 70, 93, 0.2) !important;
+}
+
+.agy-trade-badge {
+  position: absolute !important;
+  top: 10px !important;
+  right: 12px !important;
+  font-size: 9px !important;
+  font-weight: 800 !important;
+  text-transform: uppercase !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  background: rgba(132, 142, 156, 0.15) !important;
+  color: #848e9c !important;
+}
+
+.agy-trade-badge.bullish {
+  background: rgba(46, 189, 133, 0.2) !important;
+  color: #2ebd85 !important;
+}
+
+.agy-trade-badge.bearish {
+  background: rgba(246, 70, 93, 0.2) !important;
+  color: #f6465d !important;
+}
+
+.agy-trade-title {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  color: #848e9c !important;
+  margin-bottom: 8px !important;
+}
+
+.agy-trade-levels {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+}
+
+.agy-lvl-item {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  font-size: 11px !important;
+  border-bottom: 1px dashed rgba(43, 49, 57, 0.4) !important;
+  padding-bottom: 4px !important;
+}
+
+.agy-lvl-item:last-child {
+  border-bottom: none !important;
+  padding-bottom: 0 !important;
+}
+
+.agy-lvl-name {
+  color: #848e9c !important;
+}
+
+.agy-lvl-val {
+  font-weight: 700 !important;
+  font-family: monospace !important;
+  color: #fff !important;
+}
+
+/* Status Indicator Footer */
+.agy-footer {
+  padding: 8px 14px !important;
+  background: rgba(24, 26, 32, 0.3) !important;
+  border-top: 1px solid rgba(43, 49, 57, 0.4) !important;
+  font-size: 9px !important;
+  color: #848e9c !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+}
+
+.agy-status {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.agy-status-dot {
+  width: 5px !important;
+  height: 5px !important;
+  border-radius: 50% !important;
+  background: #848e9c !important;
+  box-shadow: 0 0 4px #848e9c !important;
+}
+
+.agy-status-dot.live {
+  background: #2ebd85 !important;
+  box-shadow: 0 0 6px #2ebd85 !important;
+  animation: agy-live-pulse 2s infinite alternate !important;
+}
+
+.agy-status-dot.loading {
+  background: #f0b90b !important;
+  box-shadow: 0 0 5px #f0b90b !important;
+  animation: agy-pulse 1s infinite alternate !important;
+}
+
+@keyframes agy-live-pulse {
+  from { box-shadow: 0 0 3px #2ebd85; }
+  to { box-shadow: 0 0 10px #2ebd85; }
+}
+
+@keyframes agy-pulse {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+
+/* Dragging utility styling */
+.agy-dragging {
+  user-select: none !important;
+}
+
+/* Minimized HUD circular content */
+.agy-minimized-icon {
+  font-size: 20px !important;
+  color: #0b0e11 !important;
+  animation: agy-pulse-shadow 2s infinite !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+@keyframes agy-pulse-shadow {
+  0% { box-shadow: 0 0 0 0 rgba(240, 185, 11, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(240, 185, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(240, 185, 11, 0); }
+}
+
+/* Flashing Alert Badges for Buy/Sell and Dimming */
+@keyframes agy-flash-buy {
+  0% { background-color: rgba(46, 189, 133, 0.2); box-shadow: 0 0 10px rgba(46, 189, 133, 0.4); }
+  50% { background-color: rgba(46, 189, 133, 0.7); box-shadow: 0 0 25px rgba(46, 189, 133, 0.9); }
+  100% { background-color: rgba(46, 189, 133, 0.2); box-shadow: 0 0 10px rgba(46, 189, 133, 0.4); }
+}
+
+@keyframes agy-flash-sell {
+  0% { background-color: rgba(246, 70, 93, 0.2); box-shadow: 0 0 10px rgba(246, 70, 93, 0.4); }
+  50% { background-color: rgba(246, 70, 93, 0.7); box-shadow: 0 0 25px rgba(246, 70, 93, 0.9); }
+  100% { background-color: rgba(246, 70, 93, 0.2); box-shadow: 0 0 10px rgba(246, 70, 93, 0.4); }
+}
+
+.agy-flash-alert {
+  padding: 10px !important;
+  border-radius: 6px !important;
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  text-align: center !important;
+  text-transform: uppercase !important;
+  letter-spacing: 1px !important;
+  color: #fff !important;
+  margin-bottom: 12px !important;
+  border: 1px solid rgba(255,255,255,0.2) !important;
+  display: block !important;
+}
+
+.agy-flash-alert.bullish {
+  animation: agy-flash-buy 1.2s infinite !important;
+}
+
+.agy-flash-alert.bearish {
+  animation: agy-flash-sell 1.2s infinite !important;
+}
+
