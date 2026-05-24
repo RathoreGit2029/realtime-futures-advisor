@@ -178,6 +178,112 @@ function updatePopupEquity() {
   });
 }
 
+let loadedSignals = [];
+
+function populatePopupTickerFilter(signals) {
+  const filterSelect = document.getElementById('popupTickerFilter');
+  if (!filterSelect) return;
+  const currentVal = filterSelect.dataset.userVal || filterSelect.value || 'ALL';
+  const normCurrentVal = currentVal.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  
+  const symbols = new Set();
+  signals.forEach(s => {
+    if (s.symbol) {
+      const norm = s.symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (norm) symbols.add(norm);
+    }
+  });
+  
+  filterSelect.innerHTML = '<option value="ALL">All Tickers</option>';
+  Array.from(symbols).sort().forEach(sym => {
+    const opt = document.createElement('option');
+    opt.value = sym;
+    opt.textContent = sym;
+    filterSelect.appendChild(opt);
+  });
+
+  getActiveTabSymbol((activeSym) => {
+    const normActiveSym = activeSym ? activeSym.toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
+    if (normActiveSym && symbols.has(normActiveSym) && !filterSelect.dataset.userHasSelected) {
+      filterSelect.value = normActiveSym;
+    } else if (symbols.has(normCurrentVal)) {
+      filterSelect.value = normCurrentVal;
+    } else {
+      filterSelect.value = 'ALL';
+    }
+    recalculateFilteredStats();
+  });
+}
+
+function recalculateFilteredStats() {
+  const filterSelect = document.getElementById('popupTickerFilter');
+  const filterVal = filterSelect ? filterSelect.value : 'ALL';
+  const normFilterVal = filterVal.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  
+  chrome.storage.local.get({ journalLastClearedTime: 0, sandboxMode: false }, (items) => {
+    const journalLastClearedTime = items.journalLastClearedTime || 0;
+    
+    let localWins = 0;
+    let localLosses = 0;
+    let localTimeouts = 0;
+
+    let sandboxWins = 0;
+    let sandboxLosses = 0;
+    let sandboxTimeouts = 0;
+
+    for (const sig of loadedSignals) {
+      const signalTime = new Date(sig.createdAt).getTime();
+      if (journalLastClearedTime && signalTime < journalLastClearedTime) {
+        continue;
+      }
+      const sigSym = sig.symbol ? sig.symbol.toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
+      if (normFilterVal !== 'ALL' && sigSym !== normFilterVal) {
+        continue;
+      }
+
+      let status = sig.status;
+      if (!status || status === "ACTIVE" || status === "SANDBOX_ACTIVE") {
+        continue;
+      }
+      const isSandbox = status.startsWith("SANDBOX_");
+      let outcome = isSandbox ? status.replace("SANDBOX_", "") : status;
+      
+      const pnlPercentage = parseFloat(sig.pnlPercentage) || 0;
+      
+      const rawOutcome = isSandbox ? status.replace("SANDBOX_", "") : status;
+      if (rawOutcome === "TIMEOUT") {
+        if (isSandbox) sandboxTimeouts++;
+        else localTimeouts++;
+      }
+
+      if (outcome === "TIMEOUT" || outcome === "INVALIDATED") {
+        outcome = pnlPercentage >= 0 ? "WIN" : "LOSS";
+      }
+
+      if (isSandbox) {
+        if (outcome === "WIN") {
+          sandboxWins++;
+        } else if (outcome === "LOSS") {
+          sandboxLosses++;
+        }
+      } else {
+        if (outcome === "WIN") {
+          localWins++;
+        } else if (outcome === "LOSS") {
+          localLosses++;
+        }
+      }
+    }
+
+    const journalStats = { wins: localWins, losses: localLosses, timeouts: localTimeouts };
+    const sandboxJournalStats = { wins: sandboxWins, losses: sandboxLosses, timeouts: sandboxTimeouts };
+
+    const activeStats = items.sandboxMode ? sandboxJournalStats : journalStats;
+    renderStats(activeStats);
+    updateJournalTitle(items.sandboxMode);
+  });
+}
+
 function syncJournalWithDatabase() {
   fetch('http://localhost:4000/api/advisor/signals')
     .then(r => {
@@ -187,59 +293,8 @@ function syncJournalWithDatabase() {
     .then(signals => {
       if (Array.isArray(signals)) {
         signals.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-        
-        chrome.storage.local.get({ journalLastClearedTime: 0, sandboxMode: false }, (items) => {
-          const journalLastClearedTime = items.journalLastClearedTime || 0;
-          
-          let localWins = 0;
-          let localLosses = 0;
-          let localTimeouts = 0;
-
-          let sandboxWins = 0;
-          let sandboxLosses = 0;
-          let sandboxTimeouts = 0;
-
-          for (const sig of signals) {
-            const signalTime = new Date(sig.createdAt).getTime();
-            if (journalLastClearedTime && signalTime < journalLastClearedTime) {
-              continue;
-            }
-            let status = sig.status;
-            if (!status || status === "ACTIVE" || status === "SANDBOX_ACTIVE") {
-              continue;
-            }
-            const isSandbox = status.startsWith("SANDBOX_");
-            let outcome = isSandbox ? status.replace("SANDBOX_", "") : status;
-            
-            const pnlPercentage = parseFloat(sig.pnlPercentage) || 0;
-            if (outcome === "TIMEOUT" || outcome === "INVALIDATED") {
-              outcome = pnlPercentage >= 0 ? "WIN" : "LOSS";
-            }
-
-            if (isSandbox) {
-              if (outcome === "WIN") {
-                sandboxWins++;
-              } else if (outcome === "LOSS") {
-                sandboxLosses++;
-              }
-            } else {
-              if (outcome === "WIN") {
-                localWins++;
-              } else if (outcome === "LOSS") {
-                localLosses++;
-              }
-            }
-          }
-
-          const journalStats = { wins: localWins, losses: localLosses, timeouts: localTimeouts };
-          const sandboxJournalStats = { wins: sandboxWins, losses: sandboxLosses, timeouts: sandboxTimeouts };
-
-          chrome.storage.local.set({ journalStats, sandboxJournalStats }, () => {
-            const activeStats = items.sandboxMode ? sandboxJournalStats : journalStats;
-            renderStats(activeStats);
-            updateJournalTitle(items.sandboxMode);
-          });
-        });
+        loadedSignals = signals;
+        populatePopupTickerFilter(signals);
       }
     })
     .catch(err => {
@@ -545,6 +600,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const targetModeSelect        = document.getElementById('targetMode');
   const customTpInput           = document.getElementById('customTp');
   const customSlInput           = document.getElementById('customSl');
+  const customTpSlModeSelect    = document.getElementById('customTpSlMode');
 
   const marginModeSelect        = document.getElementById('marginMode');
   const walletBalanceRange      = document.getElementById('walletBalanceRange');
@@ -634,6 +690,7 @@ document.addEventListener('DOMContentLoaded', () => {
     targetMode:      'INDICATOR',
     customTakeProfit: 2.0,
     customStopLoss:  1.0,
+    customTpSlMode:  'margin',
     marginMode:      'ISOLATED',
     walletBalance:   1000,
     sandboxWalletBalance: 1000,
@@ -658,6 +715,7 @@ document.addEventListener('DOMContentLoaded', () => {
     targetModeSelect.value = items.targetMode;
     customTpInput.value = items.customTakeProfit;
     customSlInput.value = items.customStopLoss;
+    if (customTpSlModeSelect) customTpSlModeSelect.value = items.customTpSlMode || 'margin';
 
     marginModeSelect.value = items.marginMode;
     loadedWalletBalance = items.walletBalance !== undefined ? items.walletBalance : 1000;
@@ -726,6 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (changes.enableAutoPilot)      enableAutoPilotCheckbox.checked      = changes.enableAutoPilot.newValue;
     if (changes.enableCircuitBreaker) enableCircuitBreakerCheckbox.checked = changes.enableCircuitBreaker.newValue;
     if (changes.timeframe)       timeframeSelect.value           = changes.timeframe.newValue;
+    if (changes.customTpSlMode)  { if (customTpSlModeSelect) customTpSlModeSelect.value = changes.customTpSlMode.newValue; }
 
     if (changes.walletBalance) {
       loadedWalletBalance = changes.walletBalance.newValue;
@@ -802,6 +861,7 @@ document.addEventListener('DOMContentLoaded', () => {
       targetMode:      targetModeSelect.value,
       customTakeProfit: parseFloat(customTpInput.value),
       customStopLoss:  parseFloat(customSlInput.value),
+      customTpSlMode:  customTpSlModeSelect ? customTpSlModeSelect.value : 'margin',
       marginMode:      marginModeSelect.value,
       enableTimeout:   enableTimeoutCheckbox.checked,
       timeoutCandles:  parseInt(timeoutCandlesInput.value)
@@ -869,6 +929,16 @@ document.addEventListener('DOMContentLoaded', () => {
   if (openDashboardBtn) {
     openDashboardBtn.addEventListener('click', () => {
       chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html') });
+    });
+  }
+
+  // ── Ticker Filter Change listener ──
+  const popupTickerFilter = document.getElementById('popupTickerFilter');
+  if (popupTickerFilter) {
+    popupTickerFilter.addEventListener('change', (e) => {
+      popupTickerFilter.dataset.userHasSelected = "true";
+      popupTickerFilter.dataset.userVal = e.target.value;
+      recalculateFilteredStats();
     });
   }
 });

@@ -683,7 +683,7 @@
     <div class="brand-section">
       <div class="brand-logo">⚡</div>
       <div class="brand-title-wrap">
-        <h1 style="display: flex; align-items: center; gap: 8px;">ANTIGRAVITY CONTROL ROOM <span id="dashboard-version-label" style="font-size: 11px; font-weight: normal; color: var(--text-muted); background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border); letter-spacing: normal;"></span></h1>
+        <h1 style="display: flex; align-items: center; gap: 8px;">ANTIGRAVITY MASTER CONTROL DASHBOARD <span id="dashboard-version-label" style="font-size: 11px; font-weight: normal; color: var(--text-muted); background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border); letter-spacing: normal;"></span></h1>
         <p>Master Trading Signals & Configuration Dashboard</p>
       </div>
     </div>
@@ -696,7 +696,7 @@
   <!-- Global Terminal Filter Select Dropdown -->
   <div class="widget" style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; background: rgba(240, 185, 11, 0.03); border-color: rgba(240, 185, 11, 0.15);">
     <div style="font-size: 13px; font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 8px;">
-      🔍 Global Terminal Filter Focus
+      🔍 Global Terminal Filter Focus <span id="filter-ticker-price-badge" style="font-size: 11px; color: #fff; background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); font-family: monospace; display: none; margin-left: 10px;"></span>
     </div>
     <div style="display: flex; gap: 12px; align-items: center;">
       <span style="font-size: 11px; color: var(--text-muted); font-weight: 800; text-transform: uppercase;">Filter Ticker:</span>
@@ -908,7 +908,49 @@
       </div>
     </div>
 
-    <!-- Right Column: Configurations -->
+    <!-- Right Column: Wallet & Configurations -->
+    <div class="dashboard-col" style="gap: 24px;">
+      <!-- Antigravity Portfolio Wallet -->
+      <div class="widget" style="padding: 16px;">
+        <div class="widget-title" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            💼 Portfolio Wallet & Margin Balance
+          </div>
+          <span class="widget-collapse-btn" data-target="wallet-content">▼</span>
+        </div>
+        <div class="widget-content" id="wallet-content">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+            <div style="background: rgba(11, 14, 17, 0.4); border: 1px solid var(--border); border-radius: 8px; padding: 12px;">
+              <div style="font-size: 8px; color: var(--text-muted); font-weight: 800; text-transform: uppercase; margin-bottom: 4px;">Margin Balance (Equity)</div>
+              <div id="wallet-equity-display" style="font-family: 'Outfit', sans-serif; font-size: 20px; font-weight: 900; color: var(--accent);">$1000.00</div>
+            </div>
+            <div style="background: rgba(11, 14, 17, 0.4); border: 1px solid var(--border); border-radius: 8px; padding: 12px;">
+              <div style="font-size: 8px; color: var(--text-muted); font-weight: 800; text-transform: uppercase; margin-bottom: 4px;">Wallet Balance</div>
+              <div id="wallet-balance-display" style="font-family: 'Outfit', sans-serif; font-size: 20px; font-weight: 900; color: #fff;">$1000.00</div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px; font-size: 11px;">
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border); padding-bottom: 4px;">
+              <span style="color: var(--text-muted);">Total Unrealized PnL:</span>
+              <span id="wallet-upnl-display" style="font-weight: 700; font-family: monospace;">$0.00</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border); padding-bottom: 4px;">
+              <span style="color: var(--text-muted);">Active Positions Margin:</span>
+              <span id="wallet-margin-display" style="font-weight: 700; font-family: monospace;">$0.00</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border); padding-bottom: 4px;">
+              <span style="color: var(--text-muted);">Portfolio Margin Ratio:</span>
+              <span id="wallet-ratio-display" style="font-weight: 700; font-family: monospace;">0.00%</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span style="color: var(--text-muted);">Available Capital (Free Balance):</span>
+              <span id="wallet-available-display" style="font-weight: 700; font-family: monospace; color: var(--green); font-size: 12px;">$1000.00</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Global Configurations -->
       <div class="widget">
         <div class="widget-title" style="display: flex; align-items: center; justify-content: space-between;">
           <span>Global Configurations</span>
@@ -943,6 +985,15 @@
         <div class="config-group" style="margin-bottom: 12px;">
           <label for="entry-threshold">Entry Sensitivity (Min Prob): <span id="threshold-val">78%</span></label>
           <input type="range" id="entry-threshold" min="50" max="95" step="1" value="78">
+        </div>
+
+        <div class="config-group" style="margin-bottom: 12px;">
+          <label for="timeframe">Analysis Timeframe</label>
+          <select id="timeframe" style="width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 8px 12px; font-size: 12px; outline: none; margin-top: 4px;">
+            <option value="5m">5 Minute (Recommended)</option>
+            <option value="15m">15 Minute</option>
+            <option value="1m">1 Minute (Highly Volatile)</option>
+          </select>
         </div>
 
         <!-- Margin & Timeout Configurations -->
@@ -986,9 +1037,16 @@
             <label for="custom-tp">Take Profit (%):</label>
             <input type="number" id="custom-tp" min="0.1" max="1000" step="0.1" value="1.5" style="width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 6px 10px; font-size: 12px; outline: none;">
           </div>
-          <div class="config-group">
+          <div class="config-group" style="margin-bottom: 8px;">
             <label for="custom-sl">Stop Loss (%):</label>
             <input type="number" id="custom-sl" min="0.1" max="100" step="0.1" value="1.0" style="width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 6px 10px; font-size: 12px; outline: none;">
+          </div>
+          <div class="config-group">
+            <label for="custom-tpsl-mode">TP/SL Percentage Reference</label>
+            <select id="custom-tpsl-mode" style="width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 6px 10px; font-size: 12px; outline: none; margin-top: 4px;">
+              <option value="margin">Margin / Leveraged (ROE %)</option>
+              <option value="position">Total Position Size (Size %)</option>
+            </select>
           </div>
         </div>
 
@@ -1054,7 +1112,8 @@
         </div>
       </div>
     </div>
-  </div>
+    </div> <!-- Close right column dashboard-col -->
+  </div> <!-- Close dashboard-grid -->
 
   <!-- Historical Trades Ledger Table -->
   <div class="widget" style="margin-top: 24px; overflow-x: auto;">

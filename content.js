@@ -101,6 +101,7 @@
         targetMode: items.targetMode || "INDICATOR",
         customTakeProfit: items.customTakeProfit !== undefined ? items.customTakeProfit : 1.5,
         customStopLoss: items.customStopLoss !== undefined ? items.customStopLoss : 1.0,
+        customTpSlMode: items.customTpSlMode || "margin",
         marginMode: items.marginMode || "ISOLATED",
         walletBalance: items.walletBalance !== undefined ? items.walletBalance : 1000,
         sandboxWalletBalance: items.sandboxWalletBalance !== undefined ? items.sandboxWalletBalance : 1000,
@@ -397,10 +398,11 @@
     let timeouts = 0;
 
     const journalLastClearedTime = settings.journalLastClearedTime || 0;
-    const cleanSym = symbol ? symbol.toUpperCase() : "";
+    const cleanSym = symbol ? symbol.toUpperCase().replace(/[^A-Z0-9]/g, '') : "";
 
     dbSignals.forEach(sig => {
-      if (!sig.symbol || sig.symbol.toUpperCase() !== cleanSym) {
+      const sigSym = sig.symbol ? sig.symbol.toUpperCase().replace(/[^A-Z0-9]/g, '') : "";
+      if (sigSym !== cleanSym) {
         return;
       }
 
@@ -541,7 +543,7 @@
             if (candles.length > 200) candles.shift();
             if (activeTrade && (activeTrade.status === "ACTIVE" || activeTrade.status === "SANDBOX_ACTIVE")) {
               activeTrade.elapsedCandles = Math.round(
-                (candleTime - activeTrade.triggerTime) / timeframeToMs(settings.timeframe)
+                (candleTime - activeTrade.triggerTime) / timeframeToMs(activeTrade.timeframe || settings.timeframe)
               );
               const isTimeoutEnabled = settings.enableTimeout !== false;
               const limit = settings.timeoutCandles !== undefined ? parseInt(settings.timeoutCandles) : 12;
@@ -651,6 +653,71 @@
       const newTime = changes.journalLastClearedTime.newValue || 0;
       settings.journalLastClearedTime = newTime;
       syncJournalWithDatabase(newTime);
+      needsUpdate = true;
+    }
+    if (changes.leverage) {
+      settings.leverage = changes.leverage.newValue !== undefined ? parseFloat(changes.leverage.newValue) : 3;
+      needsUpdate = true;
+    }
+    if (changes.riskAmount) {
+      settings.riskAmount = changes.riskAmount.newValue !== undefined ? parseFloat(changes.riskAmount.newValue) : 20;
+      needsUpdate = true;
+    }
+    if (changes.timeframe) {
+      const oldTf = settings.timeframe;
+      settings.timeframe = changes.timeframe.newValue || "5m";
+      if (oldTf !== settings.timeframe) {
+        console.log(`🔄 Real-time tab sync: timeframe changed from ${oldTf} to ${settings.timeframe}. Restarting stream.`);
+        needsUpdate = true;
+        if (activeSymbol) restartDataSync();
+      }
+    }
+    if (changes.enableSMC) {
+      settings.enableSMC = changes.enableSMC.newValue !== false;
+      needsUpdate = true;
+    }
+    if (changes.enableTechnical) {
+      settings.enableTechnical = changes.enableTechnical.newValue !== false;
+      needsUpdate = true;
+    }
+    if (changes.enableAudio) {
+      settings.enableAudio = changes.enableAudio.newValue !== false;
+      needsUpdate = true;
+    }
+    if (changes.enableAutoPilot) {
+      settings.enableAutoPilot = changes.enableAutoPilot.newValue === true;
+      needsUpdate = true;
+    }
+    if (changes.enableCircuitBreaker) {
+      settings.enableCircuitBreaker = changes.enableCircuitBreaker.newValue !== false;
+      needsUpdate = true;
+    }
+    if (changes.sizeMode) {
+      settings.sizeMode = changes.sizeMode.newValue || "RISK";
+      needsUpdate = true;
+    }
+    if (changes.tradeCapital) {
+      settings.tradeCapital = changes.tradeCapital.newValue !== undefined ? parseFloat(changes.tradeCapital.newValue) : 100;
+      needsUpdate = true;
+    }
+    if (changes.targetMode) {
+      settings.targetMode = changes.targetMode.newValue || "INDICATOR";
+      needsUpdate = true;
+    }
+    if (changes.customTakeProfit) {
+      settings.customTakeProfit = changes.customTakeProfit.newValue !== undefined ? parseFloat(changes.customTakeProfit.newValue) : 1.5;
+      needsUpdate = true;
+    }
+    if (changes.customStopLoss) {
+      settings.customStopLoss = changes.customStopLoss.newValue !== undefined ? parseFloat(changes.customStopLoss.newValue) : 1.0;
+      needsUpdate = true;
+    }
+    if (changes.triggerThreshold) {
+      settings.triggerThreshold = changes.triggerThreshold.newValue !== undefined ? parseInt(changes.triggerThreshold.newValue) : 78;
+      needsUpdate = true;
+    }
+    if (changes.customTpSlMode) {
+      settings.customTpSlMode = changes.customTpSlMode.newValue || "margin";
       needsUpdate = true;
     }
     
@@ -1614,8 +1681,13 @@
       
       if (useCustom) {
         const leverage = parseFloat(settings.leverage) || 3;
-        const stopLossPercent = (parseFloat(settings.customStopLoss) || 0) / leverage;
-        const takeProfitPercent = (parseFloat(settings.customTakeProfit) || 0) / leverage;
+        const isPosMode = settings.customTpSlMode === 'position';
+        const stopLossPercent = isPosMode 
+          ? (parseFloat(settings.customStopLoss) || 0)
+          : (parseFloat(settings.customStopLoss) || 0) / leverage;
+        const takeProfitPercent = isPosMode 
+          ? (parseFloat(settings.customTakeProfit) || 0)
+          : (parseFloat(settings.customTakeProfit) || 0) / leverage;
         currentSignal.stopLoss = curClose * (1 - (stopLossPercent / 100));
         currentSignal.target1 = curClose * (1 + (takeProfitPercent / 100));
         currentSignal.target2 = curClose * (1 + (takeProfitPercent / 100) * 2);
@@ -1641,8 +1713,13 @@
 
       if (useCustom) {
         const leverage = parseFloat(settings.leverage) || 3;
-        const stopLossPercent = (parseFloat(settings.customStopLoss) || 0) / leverage;
-        const takeProfitPercent = (parseFloat(settings.customTakeProfit) || 0) / leverage;
+        const isPosMode = settings.customTpSlMode === 'position';
+        const stopLossPercent = isPosMode 
+          ? (parseFloat(settings.customStopLoss) || 0)
+          : (parseFloat(settings.customStopLoss) || 0) / leverage;
+        const takeProfitPercent = isPosMode 
+          ? (parseFloat(settings.customTakeProfit) || 0)
+          : (parseFloat(settings.customTakeProfit) || 0) / leverage;
         currentSignal.stopLoss = curClose * (1 + (stopLossPercent / 100));
         currentSignal.target1 = curClose * (1 - (takeProfitPercent / 100));
         currentSignal.target2 = curClose * (1 - (takeProfitPercent / 100) * 2);
@@ -1818,6 +1895,7 @@
       confidence: currentSignal.probability,
       triggerCatalyst: currentSignal.triggerCatalyst,
       leverage: settings.leverage,          // BUG8 FIX: stored so popup PnL uses correct leverage
+      timeframe: settings.timeframe,
       positionSize: parseFloat(currentSignal.positionSize) || 0
     };
 
@@ -2208,7 +2286,7 @@
         <div class="agy-header" id="agy-drag-handle">
           <div class="agy-title-container">
             <span class="agy-logo">⚡</span>
-            <span class="agy-text-title">ANTIGRAVITY</span>
+            <span class="agy-text-title">ANTIGRAVITY TICKER HUD OVERLAY</span>
             <span class="agy-active-pair" id="agy-pair-label">USDT</span>
             <span class="agy-mode-badge hunting" id="agy-mode-indicator">HUNTING</span>
             <span class="agy-auto-badge auto-off" id="agy-auto-indicator" style="cursor: pointer; font-size: 8px !important; font-weight: 800 !important; padding: 2px 5px !important; border-radius: 4px !important; text-transform: uppercase !important; display: inline-block !important; letter-spacing: 0.5px !important;" title="Click to Toggle Auto-Pilot">🤖 AUTO: OFF</span>
@@ -2852,11 +2930,12 @@
     }
   }
 
-  // Periodically refresh history from PostgreSQL every 15s to keep cached dbSignals fresh
   setInterval(() => {
     if (!checkContextSafety()) return;
     chrome.storage.local.get('journalLastClearedTime', (res) => {
-      syncJournalWithDatabase(res.journalLastClearedTime || 0);
+      syncJournalWithDatabase(res.journalLastClearedTime || 0, () => {
+        runCalculations();
+      });
     });
   }, 15000);
 

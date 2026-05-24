@@ -10,6 +10,16 @@ let settings = {};
 // Cache for live prices to compute PnL
 let priceCache = {};
 
+function timeframeToMs(tf) {
+  if (!tf) return 5 * 60 * 1000;
+  const num = parseInt(tf);
+  const unit = tf.replace(num, "");
+  if (unit === "m") return num * 60 * 1000;
+  if (unit === "h") return num * 60 * 60 * 1000;
+  if (unit === "d") return num * 24 * 60 * 60 * 1000;
+  return 5 * 60 * 1000; // default 5m
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const versionLabel = document.getElementById('dashboard-version-label');
   if (versionLabel) {
@@ -37,6 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const targetModeSelect = document.getElementById('target-mode');
   const customTpInput = document.getElementById('custom-tp');
   const customSlInput = document.getElementById('custom-sl');
+  const timeframeSelect = document.getElementById('timeframe');
+  const customTpSlModeSelect = document.getElementById('custom-tpsl-mode');
   
   const groupRiskAmount = document.getElementById('group-risk-amount');
   const groupTradeCapital = document.getElementById('group-trade-capital');
@@ -209,14 +221,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterSelect = document.getElementById('global-ticker-filter');
     if (!filterSelect) return;
     const currentVal = filterSelect.value || 'ALL';
+    const normCurrentVal = currentVal.toUpperCase().replace(/[^A-Z0-9]/g, '');
     
     const symbols = new Set();
     signals.forEach(s => {
-      if (s.symbol) symbols.add(s.symbol.toUpperCase());
+      if (s.symbol) {
+        const norm = s.symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (norm) symbols.add(norm);
+      }
     });
     
     Object.keys(activeTrades).forEach(sym => {
-      symbols.add(sym.toUpperCase());
+      const norm = sym.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (norm) symbols.add(norm);
     });
     
     filterSelect.innerHTML = '<option value="ALL">All Tickers</option>';
@@ -227,8 +244,9 @@ document.addEventListener('DOMContentLoaded', () => {
       filterSelect.appendChild(opt);
     });
     
-    if (symbols.has(currentVal)) {
-      filterSelect.value = currentVal;
+    if (symbols.has(normCurrentVal)) {
+      filterSelect.value = normCurrentVal;
+      activeTickerFilter = normCurrentVal;
     } else {
       filterSelect.value = 'ALL';
       activeTickerFilter = 'ALL';
@@ -369,6 +387,8 @@ document.addEventListener('DOMContentLoaded', () => {
     targetModeSelect.value = items.targetMode || 'INDICATOR';
     customTpInput.value = items.customTakeProfit !== undefined ? items.customTakeProfit : 1.5;
     customSlInput.value = items.customStopLoss !== undefined ? items.customStopLoss : 1.0;
+    if (timeframeSelect) timeframeSelect.value = items.timeframe || '5m';
+    if (customTpSlModeSelect) customTpSlModeSelect.value = items.customTpSlMode || 'margin';
 
     loadedWalletBalance = items.walletBalance !== undefined ? items.walletBalance : 1000;
     loadedSandboxWalletBalance = items.sandboxWalletBalance !== undefined ? items.sandboxWalletBalance : 1000;
@@ -483,6 +503,16 @@ document.addEventListener('DOMContentLoaded', () => {
         timeoutCandlesInput.value = changes.timeoutCandles.newValue;
       }
     }
+    if (changes.timeframe) {
+      if (timeframeSelect) {
+        timeframeSelect.value = changes.timeframe.newValue;
+      }
+    }
+    if (changes.customTpSlMode) {
+      if (customTpSlModeSelect) {
+        customTpSlModeSelect.value = changes.customTpSlMode.newValue;
+      }
+    }
     
     let activeTradesChanged = false;
     let tabStatesChanged = false;
@@ -574,7 +604,9 @@ document.addEventListener('DOMContentLoaded', () => {
       customStopLoss: parseFloat(customSlInput.value) || 1.0,
       marginMode: marginModeSelect ? marginModeSelect.value : 'ISOLATED',
       enableTimeout: enableTimeoutCheck ? enableTimeoutCheck.checked : true,
-      timeoutCandles: timeoutCandlesInput ? parseInt(timeoutCandlesInput.value) : 12
+      timeoutCandles: timeoutCandlesInput ? parseInt(timeoutCandlesInput.value) : 12,
+      timeframe: timeframeSelect ? timeframeSelect.value : '5m',
+      customTpSlMode: customTpSlModeSelect ? customTpSlModeSelect.value : 'margin'
     };
 
     if (walletBalanceInput) {
@@ -720,9 +752,39 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function updateTickerFilterPrices() {
+    const filterSelect = document.getElementById('global-ticker-filter');
+    if (!filterSelect) return;
+    Array.from(filterSelect.options).forEach(opt => {
+      const sym = opt.value;
+      if (sym !== 'ALL') {
+        const price = priceCache[sym];
+        opt.textContent = price ? `${sym} ($${price.toFixed(2)})` : sym;
+      }
+    });
+
+    const badgeEl = document.getElementById('filter-ticker-price-badge');
+    if (badgeEl) {
+      if (activeTickerFilter && activeTickerFilter !== 'ALL') {
+        const price = priceCache[activeTickerFilter];
+        badgeEl.textContent = price ? `${activeTickerFilter}: $${price.toFixed(2)}` : `${activeTickerFilter}: ---`;
+        badgeEl.style.display = 'inline-block';
+      } else {
+        badgeEl.style.display = 'none';
+      }
+    }
+  }
+
   // 6. Fetch live ticker prices for PnL
   function fetchPrices() {
-    const symbols = Object.keys(activeTrades);
+    const symbolsSet = new Set(Object.keys(activeTrades));
+    const filterSelect = document.getElementById('global-ticker-filter');
+    if (filterSelect) {
+      Array.from(filterSelect.options).forEach(opt => {
+        if (opt.value !== 'ALL') symbolsSet.add(opt.value);
+      });
+    }
+    const symbols = Array.from(symbolsSet);
     if (symbols.length === 0) {
       updateDashboardEquity();
       return;
@@ -742,7 +804,12 @@ document.addEventListener('DOMContentLoaded', () => {
           const price = parseFloat(d.price);
           if (price > 0) {
             priceCache[sym] = price;
-            updatePnLDisplay(sym);
+            if (activeTrades[sym]) {
+              updatePnLDisplay(sym);
+            } else {
+              updateDashboardEquity();
+            }
+            updateTickerFilterPrices();
           }
         })
         .catch(() => {});
@@ -887,7 +954,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const posIsSandbox = pos.status === 'SANDBOX_ACTIVE';
       if (posIsSandbox !== isSandbox) return;
 
-      if (ageEl && pos.elapsedCandles != null) {
+      if (ageEl && pos.triggerTime) {
+        const tf = pos.timeframe || items.timeframe || '5m';
+        const elapsed = Math.floor((Date.now() - pos.triggerTime) / timeframeToMs(tf));
+        ageEl.textContent = Math.max(0, elapsed);
+      } else if (ageEl && pos.elapsedCandles != null) {
         ageEl.textContent = pos.elapsedCandles;
       }
 
@@ -1017,22 +1088,58 @@ document.addEventListener('DOMContentLoaded', () => {
         .filter(t => t && (t.status === 'SANDBOX_ACTIVE') === isSandbox);
 
       let totalUnrealizedPnl = 0;
+      let totalPositionMargin = 0;
+      let totalMaintenanceMargin = 0;
+
       activeList.forEach(t => {
         const tSym = t.symbol;
         const tTickPrice = priceCache[tSym] || parseFloat(t.entry) || 0;
         const tEntry = parseFloat(t.entry) || 0;
         const tSize = parseFloat(t.positionSize) || 0;
+        const tLeverage = parseFloat(t.leverage) || 3;
         const tIsLong = t.direction === 'LONG';
 
-        if (tTickPrice > 0 && tEntry > 0 && tSize > 0) {
-          const tUpnl = tIsLong
-            ? (tTickPrice - tEntry) * tSize
-            : (tEntry - tTickPrice) * tSize;
-          totalUnrealizedPnl += tUpnl;
+        if (tEntry > 0 && tSize > 0) {
+          totalPositionMargin += (tSize * tEntry) / tLeverage;
+          if (tTickPrice > 0) {
+            const tUpnl = tIsLong
+              ? (tTickPrice - tEntry) * tSize
+              : (tEntry - tTickPrice) * tSize;
+            totalUnrealizedPnl += tUpnl;
+            totalMaintenanceMargin += tSize * tTickPrice * 0.004;
+          } else {
+            totalMaintenanceMargin += tSize * tEntry * 0.004;
+          }
         }
       });
 
       const equity = walletBalance + totalUnrealizedPnl;
+      const marginRatio = equity <= 0 ? 100 : Math.min((totalMaintenanceMargin / equity) * 100, 100);
+      const availableCapital = Math.max(0, equity - totalPositionMargin);
+
+      // Update Portfolio Wallet DOM elements
+      const wEquityEl = document.getElementById('wallet-equity-display');
+      const wWalletEl = document.getElementById('wallet-balance-display');
+      const wUpnlEl = document.getElementById('wallet-upnl-display');
+      const wMarginEl = document.getElementById('wallet-margin-display');
+      const wRatioEl = document.getElementById('wallet-ratio-display');
+      const wAvailableEl = document.getElementById('wallet-available-display');
+
+      if (wEquityEl) wEquityEl.textContent = `$${equity.toFixed(2)}`;
+      if (wWalletEl) wWalletEl.textContent = `$${walletBalance.toFixed(2)}`;
+      if (wUpnlEl) {
+        const pnlSign = totalUnrealizedPnl >= 0 ? '+' : '';
+        wUpnlEl.textContent = `${pnlSign}$${totalUnrealizedPnl.toFixed(2)}`;
+        wUpnlEl.style.color = totalUnrealizedPnl >= 0 ? 'var(--green)' : 'var(--red)';
+      }
+      if (wMarginEl) wMarginEl.textContent = `$${totalPositionMargin.toFixed(2)}`;
+      if (wRatioEl) {
+        wRatioEl.textContent = `${marginRatio.toFixed(2)}%`;
+        wRatioEl.style.color = marginRatio > 50 ? 'var(--red)' : marginRatio > 20 ? 'var(--accent)' : 'var(--green)';
+      }
+      if (wAvailableEl) wAvailableEl.textContent = `$${availableCapital.toFixed(2)}`;
+
+      // Legacy support for title bar performance journals
       if (isSandbox) {
         const sandEquityEl = document.getElementById('sandbox-equity');
         if (sandEquityEl) sandEquityEl.textContent = equity.toFixed(2);
@@ -1414,7 +1521,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 2. Filter by global ticker focus
       if (activeTickerFilter !== 'ALL') {
-        filtered = filtered.filter(s => s.symbol && s.symbol.toUpperCase() === activeTickerFilter);
+        const normActiveFilter = activeTickerFilter.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        filtered = filtered.filter(s => {
+          const sigSym = s.symbol ? s.symbol.toUpperCase().replace(/[^A-Z0-9]/g, '') : "";
+          return sigSym === normActiveFilter;
+        });
       }
 
       // 3. Filter by type (REAL vs SANDBOX)

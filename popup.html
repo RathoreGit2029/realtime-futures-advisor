@@ -233,8 +233,8 @@
   <div class="header">
     <div class="logo">⚡</div>
     <div>
-      <div class="title">Antigravity Advisor</div>
-      <div class="subtitle">Binance Futures · SMC HUD <span id="popup-version-label"></span></div>
+      <div class="title">Antigravity Quick-Access Popup</div>
+      <div class="subtitle">Binance Futures · Ticker HUD <span id="popup-version-label"></span></div>
     </div>
     <div class="live-badge">
       <div class="live-dot synced" id="syncDot"></div>
@@ -297,6 +297,12 @@
       Performance Journal
       <span id="journalWalletBalance" style="font-size: 11px; color: var(--accent); margin-left: 10px; font-weight: bold;"></span>
       <span class="badge" id="totalTradeBadge">0 Trades</span>
+    </div>
+    <div class="form-group" style="margin-top: 8px; margin-bottom: 8px;">
+      <label for="popupTickerFilter" style="font-size: 9px; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Filter Ticker</label>
+      <select id="popupTickerFilter" style="width: 100%; background: var(--card-bg2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 5px; font-size: 11px; outline: none; cursor: pointer; margin-top: 2px;">
+        <option value="ALL">All Tickers</option>
+      </select>
     </div>
     <div class="stats-grid">
       <div class="stat-card">
@@ -404,6 +410,13 @@
       <div class="form-group">
         <label for="customSl">Stop Loss (%)</label>
         <input type="number" id="customSl" min="0.1" max="100" step="0.1" value="1.0">
+      </div>
+      <div class="form-group" style="margin-top: 10px;">
+        <label for="customTpSlMode">TP/SL Percentage Reference</label>
+        <select id="customTpSlMode">
+          <option value="margin">Margin / Leveraged (ROE %)</option>
+          <option value="position">Total Position Size (Size %)</option>
+        </select>
       </div>
     </div>
     <div class="form-group">
