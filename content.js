@@ -44,6 +44,7 @@
   let activeTrades = {};  // dictionary of active trades: { [symbol]: activeTrade }
   let journalStats = { wins: 0, losses: 0, timeouts: 0 };
   let sandboxJournalStats = { wins: 0, losses: 0, timeouts: 0 };
+  let dbSignals = [];
   let advisorMode = "HUNTING"; // "HUNTING" or "MONITORING"
   let closeSignal = {
     active: false,
@@ -328,6 +329,7 @@
     fetchApi('http://localhost:4000/api/advisor/signals', 'GET')
       .then(signals => {
         if (Array.isArray(signals)) {
+          dbSignals = signals;
           signals.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
           
           let localWins = 0;
@@ -387,6 +389,56 @@
         console.warn("⚠️ Failed to sync journal with PostgreSQL on load, using storage cache:", err.message);
         if (callback) callback();
       });
+  }
+
+  function getTickerJournalStats(symbol, isSandbox) {
+    let wins = 0;
+    let losses = 0;
+    let timeouts = 0;
+
+    const journalLastClearedTime = settings.journalLastClearedTime || 0;
+    const cleanSym = symbol ? symbol.toUpperCase() : "";
+
+    dbSignals.forEach(sig => {
+      if (!sig.symbol || sig.symbol.toUpperCase() !== cleanSym) {
+        return;
+      }
+
+      const signalTime = new Date(sig.createdAt).getTime();
+      if (journalLastClearedTime && signalTime < journalLastClearedTime) {
+        return;
+      }
+
+      let status = sig.status;
+      if (!status || status === "ACTIVE" || status === "SANDBOX_ACTIVE") {
+        return;
+      }
+
+      const isSigSandbox = status.startsWith("SANDBOX_") || sig.actualOutcome === 'SANDBOX';
+      if (isSigSandbox !== isSandbox) {
+        return;
+      }
+
+      let outcome = isSigSandbox ? status.replace("SANDBOX_", "") : status;
+      const pnlPercentage = parseFloat(sig.pnlPercentage) || 0;
+
+      const rawOutcome = isSigSandbox ? status.replace("SANDBOX_", "") : status;
+      if (rawOutcome === "TIMEOUT") {
+        timeouts++;
+      }
+
+      if (outcome === "TIMEOUT" || outcome === "INVALIDATED") {
+        outcome = pnlPercentage >= 0 ? "WIN" : "LOSS";
+      }
+
+      if (outcome === "WIN") {
+        wins++;
+      } else if (outcome === "LOSS") {
+        losses++;
+      }
+    });
+
+    return { wins, losses, timeouts };
   }
 
   // Listen for updates
@@ -593,6 +645,12 @@
     }
     if (changes.timeoutCandles) {
       settings.timeoutCandles = changes.timeoutCandles.newValue !== undefined ? changes.timeoutCandles.newValue : 12;
+      needsUpdate = true;
+    }
+    if (changes.journalLastClearedTime) {
+      const newTime = changes.journalLastClearedTime.newValue || 0;
+      settings.journalLastClearedTime = newTime;
+      syncJournalWithDatabase(newTime);
       needsUpdate = true;
     }
     
@@ -2577,7 +2635,7 @@
     const timeoutsEl = document.getElementById("agy-val-timeouts");
     const ledgerTitleEl = document.getElementById("agy-ledger-title");
     if (winsEl && lossesEl && timeoutsEl) {
-      const activeStats = settings.sandboxMode ? sandboxJournalStats : journalStats;
+      const activeStats = getTickerJournalStats(activeSymbol, !!settings.sandboxMode);
       winsEl.textContent = activeStats.wins;
       lossesEl.textContent = activeStats.losses;
       timeoutsEl.textContent = activeStats.timeouts;
@@ -2793,5 +2851,13 @@
       chrome.storage.local.set({ ['tabState_' + activeSymbol]: scanState });
     }
   }
+
+  // Periodically refresh history from PostgreSQL every 15s to keep cached dbSignals fresh
+  setInterval(() => {
+    if (!checkContextSafety()) return;
+    chrome.storage.local.get('journalLastClearedTime', (res) => {
+      syncJournalWithDatabase(res.journalLastClearedTime || 0);
+    });
+  }, 15000);
 
 })();
