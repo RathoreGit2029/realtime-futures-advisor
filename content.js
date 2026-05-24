@@ -7,6 +7,7 @@
   console.log("⚡ Upgraded Antigravity Real-Time Binance Futures Advisor with Action Logger Loaded!");
 
   // --- STATE VARIABLES ---
+  window._antigravityEngine = window.AntigravityCore ? new window.AntigravityCore.AntigravityEngine() : null;
   let activeSymbol = "";
   let settings = {
     riskAmount: 20,
@@ -25,6 +26,7 @@
   let forceSpotWS = false; // Force Spot WebSocket due to consecutive drops
   let wsFailures = 0;      // Count consecutive WebSocket failures
   let candles = []; // Array of { time, open, high, low, close, volume }
+  let lastWsEventTime = Date.now();
   let currentTickPrice = 0;
   let symbolPrecisions = {}; // Cached quantity and price precisions
 
@@ -498,6 +500,9 @@
         const data = JSON.parse(request.data);
         const stream = data.stream;
         const payload = data.data;
+        if (payload && payload.E) {
+          lastWsEventTime = parseInt(payload.E);
+        }
 
         const isTfStream   = stream.includes(`kline_${settings.timeframe}`);
         const is1mStream   = stream.includes('kline_1m');
@@ -1126,6 +1131,94 @@
       bullishOB: orderBlocks.bullish.filter(ob => ob.unmitigated).length,
       bearishOB: orderBlocks.bearish.filter(ob => ob.unmitigated).length
     };
+
+    // --- PHASE 1 SHADOW MODE INTEGRATION ---
+    if (window._antigravityEngine && window.AntigravityCore) {
+      try {
+        const { MarketRegime, MarketState } = window.AntigravityCore;
+        
+        // Volatility metrics
+        const atrValues = calculateATR(candles, 14);
+        const curAtr = atrValues[atrValues.length - 1] || 0;
+        let atrRank = 50;
+        let isExpanding = false;
+        let isCompressing = false;
+        if (atrValues.length > 20) {
+          const recentAtrs = atrValues.slice(-100);
+          const smaller = recentAtrs.filter(val => val < curAtr).length;
+          atrRank = Math.round((smaller / recentAtrs.length) * 100);
+          
+          const avgAtr20 = atrValues.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, atrValues.length);
+          isExpanding = curAtr > avgAtr20 * 1.15;
+          isCompressing = curAtr < avgAtr20 * 0.85;
+        }
+
+        // HTF alignment
+        const htfAligned = (ema21_15m !== null && ema21_1h !== null)
+          ? ((curClose > ema21_15m && curClose > ema21_1h && curEma9 > curEma21) ||
+             (curClose < ema21_15m && curClose < ema21_1h && curEma9 < curEma21))
+          : true;
+
+        // Session metrics
+        const dateObj = new Date(lastWsEventTime);
+        const utcHour = dateObj.getUTCHours();
+        const utcMin = dateObj.getUTCMinutes();
+        const utcDec = utcHour + utcMin / 60;
+        
+        let sessionName = 'ASIA';
+        let isOverlapSession = false;
+        
+        if (utcDec >= 8 && utcDec < 14) {
+          sessionName = 'LONDON';
+        } else if (utcDec >= 14 && utcDec < 21) {
+          sessionName = 'NEW_YORK';
+        } else if (utcDec >= 21 || utcDec < 2) {
+          sessionName = 'POST_NY_CHOP';
+        }
+        
+        if (utcDec >= 13 && utcDec <= 14) {
+          isOverlapSession = true;
+        }
+        const minIntoSession = utcMin + (utcHour % 8) * 60;
+
+        const ctx = {
+          timestamp: lastWsEventTime,
+          symbol: activeSymbol,
+          regime: MarketRegime.CHOPPY, // Will be classified
+          marketState: advisorMode === "HUNTING" ? MarketState.EXECUTION_WINDOW : MarketState.NO_TRADE,
+          volatility: {
+            atr: curAtr,
+            isExpanding,
+            isCompressing,
+            historicalRank: atrRank
+          },
+          liquidityState: {
+            hasSweep: sweeps.length > 0,
+            sweepQuality: sweeps.length > 0 ? 85 : 0,
+            recentSweepDirection: sweeps.length > 0 ? sweeps[0].type === 'bullish' ? 'BULLISH' : 'BEARISH' : null
+          },
+          trendState: {
+            direction: curEma9 > curEma21 ? 'UP' : 'DOWN',
+            strength: Math.abs(curEma9 - curEma21),
+            htfAlignment: htfAligned
+          },
+          sessionState: { 
+            currentSession: sessionName, 
+            isOverlap: isOverlapSession, 
+            minutesIntoSession: minIntoSession 
+          },
+          displacementQuality: 80,
+          spread: curClose * 0.00015, // Est 1.5 bps spread
+          confidence: 50,
+          currentPrice: curClose
+        };
+        
+        window._antigravityEngine.evaluateTick(ctx, true); // true = Shadow Mode
+      } catch (err) {
+        console.error("Shadow Mode Engine Error:", err);
+      }
+    }
+    // ---------------------------------------
 
     if (advisorMode === "MONITORING") {
       runExitCalculations(curClose, curEma9, curEma21, curRsi, orderBlocks, sweeps);

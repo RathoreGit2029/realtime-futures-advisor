@@ -1,0 +1,45 @@
+import { Constraint, ConstraintResult, MarketContext, MarketState } from '../engine/Types';
+
+export class LiquidityConstraint implements Constraint {
+  public id = 'LiquidityConstraint';
+
+  public evaluate(ctx: MarketContext): ConstraintResult {
+    const { liquidityState, marketState, trendState } = ctx;
+
+    // Only strictly enforce sweep requirement if we are looking for a reversal or displacement entry
+    if (marketState === MarketState.EXECUTION_WINDOW) {
+      if (!liquidityState.hasSweep) {
+        return {
+          passed: false,
+          confidenceImpact: 0,
+          reason: 'No liquidity sweep detected prior to execution window. Institutional trap risk high.'
+        };
+      }
+
+      if (liquidityState.sweepQuality < 40) {
+        return {
+          passed: false,
+          confidenceImpact: 0,
+          reason: `Sweep quality too low (${liquidityState.sweepQuality}). Potential weak hands trap.`
+        };
+      }
+      
+      // Ensure sweep direction opposes the intended trade direction (sweep retail longs to go long)
+      const intendedTradeDirection = trendState.direction; 
+      if (intendedTradeDirection === 'UP' && liquidityState.recentSweepDirection === 'BULLISH') {
+        // Bullish sweep means they swept resistance (retail shorts stopped out). We shouldn't buy here usually unless breakout.
+         return {
+          passed: false,
+          confidenceImpact: 0,
+          reason: 'Sweep direction opposes logical entry. Swept highs, but looking for longs.'
+        };
+      }
+    }
+
+    return {
+      passed: true,
+      confidenceImpact: liquidityState.sweepQuality > 80 ? 15 : 5,
+      reason: 'Liquidity sweep confirmed and valid.'
+    };
+  }
+}
