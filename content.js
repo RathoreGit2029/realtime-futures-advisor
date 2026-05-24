@@ -1555,9 +1555,12 @@
       currentSignal.patternName = activePattern;
       
       if (useCustom) {
-        currentSignal.stopLoss = curClose * (1 - (settings.customStopLoss / 100));
-        currentSignal.target1 = curClose * (1 + (settings.customTakeProfit / 100));
-        currentSignal.target2 = curClose * (1 + (settings.customTakeProfit / 100) * 2);
+        const leverage = parseFloat(settings.leverage) || 3;
+        const stopLossPercent = (parseFloat(settings.customStopLoss) || 0) / leverage;
+        const takeProfitPercent = (parseFloat(settings.customTakeProfit) || 0) / leverage;
+        currentSignal.stopLoss = curClose * (1 - (stopLossPercent / 100));
+        currentSignal.target1 = curClose * (1 + (takeProfitPercent / 100));
+        currentSignal.target2 = curClose * (1 + (takeProfitPercent / 100) * 2);
       } else {
         const closestBullishOB = orderBlocks.bullish.filter(ob => ob.unmitigated).pop();
         const structLow = closestBullishOB ? closestBullishOB.low : Math.min(candles[candles.length - 2].low, candles[candles.length - 1].low);
@@ -1579,9 +1582,12 @@
       currentSignal.patternName = activePattern;
 
       if (useCustom) {
-        currentSignal.stopLoss = curClose * (1 + (settings.customStopLoss / 100));
-        currentSignal.target1 = curClose * (1 - (settings.customTakeProfit / 100));
-        currentSignal.target2 = curClose * (1 - (settings.customTakeProfit / 100) * 2);
+        const leverage = parseFloat(settings.leverage) || 3;
+        const stopLossPercent = (parseFloat(settings.customStopLoss) || 0) / leverage;
+        const takeProfitPercent = (parseFloat(settings.customTakeProfit) || 0) / leverage;
+        currentSignal.stopLoss = curClose * (1 + (stopLossPercent / 100));
+        currentSignal.target1 = curClose * (1 - (takeProfitPercent / 100));
+        currentSignal.target2 = curClose * (1 - (takeProfitPercent / 100) * 2);
       } else {
         const closestBearishOB = orderBlocks.bearish.filter(ob => ob.unmitigated).pop();
         const structHigh = closestBearishOB ? closestBearishOB.high : Math.max(candles[candles.length - 2].high, candles[candles.length - 1].high);
@@ -2390,16 +2396,22 @@
       if (!monitorLevels || !monitorBox) return;
 
       const sideColor = activeTrade.direction === "LONG" ? "#2ebd85" : "#f6465d";
+      const leverage = parseFloat(activeTrade.leverage) || parseFloat(settings.leverage) || 3;
       const pnlPercent = activeTrade.direction === "LONG"
-        ? ((currentTickPrice - activeTrade.entry) / activeTrade.entry) * 100 * settings.leverage
-        : ((activeTrade.entry - currentTickPrice) / activeTrade.entry) * 100 * settings.leverage;
+        ? ((currentTickPrice - activeTrade.entry) / activeTrade.entry) * 100 * leverage
+        : ((activeTrade.entry - currentTickPrice) / activeTrade.entry) * 100 * leverage;
+      const sizePercent = activeTrade.direction === "LONG"
+        ? ((currentTickPrice - activeTrade.entry) / activeTrade.entry) * 100
+        : ((activeTrade.entry - currentTickPrice) / activeTrade.entry) * 100;
       const pnlDollar = activeTrade.direction === "LONG"
         ? (currentTickPrice - activeTrade.entry) * (activeTrade.positionSize || 0)
         : (activeTrade.entry - currentTickPrice) * (activeTrade.positionSize || 0);
       const pnlColor = pnlPercent >= 0 ? "#2ebd85" : "#f6465d";
       const pnlSign = pnlPercent >= 0 ? "+" : "";
+      const sizeSign = sizePercent >= 0 ? "+" : "";
 
-      const timeOpacity = Math.max(0.0, 1 - ((activeTrade.elapsedCandles || 0) / 12));
+      const timeoutCandles = settings.enableTimeout !== false ? (settings.timeoutCandles !== undefined ? settings.timeoutCandles : 12) : 12;
+      const timeOpacity = Math.max(0.0, 1 - ((activeTrade.elapsedCandles || 0) / timeoutCandles));
       const initDist = Math.abs(activeTrade.entry - activeTrade.stopLoss);
       const currDist = Math.abs(currentTickPrice - activeTrade.stopLoss);
       let priceOpacity = 1.0;
@@ -2419,7 +2431,7 @@
         <div class="agy-lvl-item">
           <span class="agy-lvl-name">Unrealized PnL</span>
           <span class="agy-lvl-val" style="color: ${pnlColor}; font-family: monospace; font-weight: 900;">
-            ${pnlSign}${pnlPercent.toFixed(2)}% &nbsp;|&nbsp; ${pnlSign}$${pnlDollar.toFixed(2)}
+            ${pnlSign}${pnlPercent.toFixed(2)}% (ROE) &nbsp;|&nbsp; ${sizeSign}${sizePercent.toFixed(2)}% (Size) &nbsp;|&nbsp; ${pnlSign}$${pnlDollar.toFixed(2)}
           </span>
         </div>
         <div class="agy-lvl-item">
@@ -2590,6 +2602,12 @@
         const currentPnlPercent = activeTrade.direction === "LONG" 
           ? ((currentTickPrice - activeTrade.entry) / activeTrade.entry) * 100 * leverage
           : ((activeTrade.entry - currentTickPrice) / activeTrade.entry) * 100 * leverage;
+        const sizePercent = activeTrade.direction === "LONG"
+          ? ((currentTickPrice - activeTrade.entry) / activeTrade.entry) * 100
+          : ((activeTrade.entry - currentTickPrice) / activeTrade.entry) * 100;
+        const pnlDollar = activeTrade.direction === "LONG"
+          ? (currentTickPrice - activeTrade.entry) * (activeTrade.positionSize || 0)
+          : (activeTrade.entry - currentTickPrice) * (activeTrade.positionSize || 0);
 
         const decayWarning = calculatedOpacity < 0.4 ? "color: #f6465d; font-weight: 900;" : "";
 
@@ -2610,8 +2628,8 @@
           </div>
           <div class="agy-lvl-item">
             <span class="agy-lvl-name">Unrealized PnL</span>
-            <span class="agy-lvl-val" style="color: ${currentPnlPercent >= 0 ? "#2ebd85" : "#f6465d"};">
-              ${currentPnlPercent >= 0 ? "+" : ""}${currentPnlPercent.toFixed(2)}% (Leveraged)
+            <span class="agy-lvl-val" style="color: ${currentPnlPercent >= 0 ? "#2ebd85" : "#f6465d"}; font-family: monospace; font-weight: 900;">
+              ${currentPnlPercent >= 0 ? "+" : ""}${currentPnlPercent.toFixed(2)}% (ROE) &nbsp;|&nbsp; ${sizePercent >= 0 ? "+" : ""}${sizePercent.toFixed(2)}% (Size) &nbsp;|&nbsp; ${pnlDollar >= 0 ? "+" : ""}$${pnlDollar.toFixed(2)}
             </span>
           </div>
           <div class="agy-lvl-item">

@@ -216,6 +216,29 @@
       font-weight: 800;
     }
 
+    .widget-content {
+      transition: all 0.3s ease-in-out;
+    }
+    .widget-content.collapsed {
+      display: none !important;
+    }
+    .widget-collapse-btn {
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      transition: all 0.2s;
+    }
+    .widget-collapse-btn:hover {
+      color: var(--accent);
+      background: rgba(240, 185, 11, 0.1);
+      border-color: var(--accent);
+    }
+
     /* ── Positions List ── */
     #positions-list {
       display: flex;
@@ -299,7 +322,7 @@
 
     .pos-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 12px;
       margin-bottom: 14px;
     }
@@ -670,6 +693,19 @@
     </div>
   </header>
 
+  <!-- Global Terminal Filter Select Dropdown -->
+  <div class="widget" style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; background: rgba(240, 185, 11, 0.03); border-color: rgba(240, 185, 11, 0.15);">
+    <div style="font-size: 13px; font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 8px;">
+      🔍 Global Terminal Filter Focus
+    </div>
+    <div style="display: flex; gap: 12px; align-items: center;">
+      <span style="font-size: 11px; color: var(--text-muted); font-weight: 800; text-transform: uppercase;">Filter Ticker:</span>
+      <select id="global-ticker-filter" style="background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 6px 16px; font-size: 12px; outline: none; font-weight: 700; cursor: pointer; transition: all 0.2s;">
+        <option value="ALL">All Tickers</option>
+      </select>
+    </div>
+  </div>
+
   <!-- Alerts Banner (shown dynamically if circuit breaker active) -->
   <div class="alert-banner" id="circuit-breaker-banner" style="display: none;">
     <div class="alert-title">🚨 Circuit Breaker Active</div>
@@ -678,10 +714,15 @@
 
   <!-- Market Sessions Clock and Timeline Bar -->
   <div class="widget" style="margin-bottom: 24px;">
-    <div class="widget-title" style="margin-bottom: 12px;">
-      🌐 GLOBAL MARKET SESSIONS & TIMELINE
-      <span class="badge" id="dashboard-ist-clock" style="font-family: monospace;">IST 00:00:00</span>
+    <div class="widget-title" style="margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        🌐 GLOBAL MARKET SESSIONS & TIMELINE
+        <span class="badge" id="dashboard-ist-clock" style="font-family: monospace;">IST 00:00:00</span>
+      </div>
+      <span class="widget-collapse-btn" data-target="timeline-content">▼</span>
     </div>
+    
+    <div class="widget-content" id="timeline-content">
     
     <!-- Timezones row -->
     <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 14px;">
@@ -731,6 +772,7 @@
       <span style="color: var(--accent); font-weight: 800;">🔴 Live Timeline Needle (UTC scale)</span>
       <span>23:59 UTC</span>
     </div>
+    </div> <!-- .widget-content -->
   </div>
 
   <!-- Performance Journals Container -->
@@ -738,41 +780,44 @@
     <!-- Real Performance Journal -->
     <div class="widget" style="padding: 16px;">
       <div class="widget-title" style="margin-bottom: 12px; font-size: 11px; color: var(--green); display: flex; align-items: center; justify-content: space-between;">
-        🟢 REAL PERFORMANCE JOURNAL <span style="font-weight: normal; margin-left: 10px; color: var(--accent);">Wallet Balance: $<span id="real-wallet-balance">1000.00</span></span>
+        <span>🟢 REAL PERFORMANCE JOURNAL <span style="font-weight: normal; margin-left: 10px; color: var(--accent);">Wallet: $<span id="real-wallet-balance">1000.00</span> | Equity: $<span id="real-equity">1000.00</span></span></span>
+        <span class="widget-collapse-btn" data-target="real-journal-content">▼</span>
       </div>
-      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Wins</span>
-          <span class="stat-val" id="stats-wins" style="color: var(--green); font-size: 18px;">0</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Losses</span>
-          <span class="stat-val" id="stats-losses" style="color: var(--red); font-size: 18px;">0</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Streak PAUSE</span>
-          <span class="stat-val" id="stats-consec-losses" style="color: var(--accent); font-size: 18px;">0</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Win Rate</span>
-          <span class="stat-val" id="stats-winrate" style="font-size: 18px;">0%</span>
-        </div>
-        <!-- Row 2 -->
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Net Profit ($)</span>
-          <span class="stat-val" id="stats-profit" style="font-size: 18px;">$0.00</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Avg Duration</span>
-          <span class="stat-val" id="stats-duration" style="font-size: 18px; color: var(--text-muted);">0m</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Profit Factor</span>
-          <span class="stat-val" id="stats-factor" style="font-size: 18px; color: var(--blue);">0.00</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Total Trades</span>
-          <span class="stat-val" id="stats-total" style="font-size: 18px; color: var(--text);">0</span>
+      <div class="widget-content" id="real-journal-content">
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Wins</span>
+            <span class="stat-val" id="stats-wins" style="color: var(--green); font-size: 18px;">0</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Losses</span>
+            <span class="stat-val" id="stats-losses" style="color: var(--red); font-size: 18px;">0</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Streak PAUSE</span>
+            <span class="stat-val" id="stats-consec-losses" style="color: var(--accent); font-size: 18px;">0</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Win Rate</span>
+            <span class="stat-val" id="stats-winrate" style="font-size: 18px;">0%</span>
+          </div>
+          <!-- Row 2 -->
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Net Profit ($)</span>
+            <span class="stat-val" id="stats-profit" style="font-size: 18px;">$0.00</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Avg Duration</span>
+            <span class="stat-val" id="stats-duration" style="font-size: 18px; color: var(--text-muted);">0m</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Profit Factor</span>
+            <span class="stat-val" id="stats-factor" style="font-size: 18px; color: var(--blue);">0.00</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Total Trades</span>
+            <span class="stat-val" id="stats-total" style="font-size: 18px; color: var(--text);">0</span>
+          </div>
         </div>
       </div>
     </div>
@@ -780,41 +825,44 @@
     <!-- Sandbox Performance Journal -->
     <div class="widget" style="padding: 16px;">
       <div class="widget-title" style="margin-bottom: 12px; font-size: 11px; color: #1e90ff; display: flex; align-items: center; justify-content: space-between;">
-        🧪 SANDBOX PERFORMANCE JOURNAL <span style="font-weight: normal; margin-left: 10px; color: var(--accent);">Wallet Balance: $<span id="sandbox-wallet-balance">1000.00</span></span>
+        <span>🧪 SANDBOX PERFORMANCE JOURNAL <span style="font-weight: normal; margin-left: 10px; color: var(--accent);">Wallet: $<span id="sandbox-wallet-balance">1000.00</span> | Equity: $<span id="sandbox-equity">1000.00</span></span></span>
+        <span class="widget-collapse-btn" data-target="sandbox-journal-content">▼</span>
       </div>
-      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Wins</span>
-          <span class="stat-val" id="sandbox-wins" style="color: var(--green); font-size: 18px;">0</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Losses</span>
-          <span class="stat-val" id="sandbox-losses" style="color: var(--red); font-size: 18px;">0</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Streak</span>
-          <span class="stat-val" id="sandbox-consec-losses" style="color: var(--accent); font-size: 18px;">0</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Win Rate</span>
-          <span class="stat-val" id="sandbox-winrate" style="font-size: 18px;">0%</span>
-        </div>
-        <!-- Row 2 -->
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Net Profit ($)</span>
-          <span class="stat-val" id="sandbox-profit" style="font-size: 18px;">$0.00</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Avg Duration</span>
-          <span class="stat-val" id="sandbox-duration" style="font-size: 18px; color: var(--text-muted);">0m</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Profit Factor</span>
-          <span class="stat-val" id="sandbox-factor" style="font-size: 18px; color: var(--blue);">0.00</span>
-        </div>
-        <div class="stat-card" style="padding: 10px; text-align: center;">
-          <span class="stat-lbl" style="font-size: 8px;">Total Trades</span>
-          <span class="stat-val" id="sandbox-total" style="font-size: 18px; color: var(--text);">0</span>
+      <div class="widget-content" id="sandbox-journal-content">
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Wins</span>
+            <span class="stat-val" id="sandbox-wins" style="color: var(--green); font-size: 18px;">0</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Losses</span>
+            <span class="stat-val" id="sandbox-losses" style="color: var(--red); font-size: 18px;">0</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Streak</span>
+            <span class="stat-val" id="sandbox-consec-losses" style="color: var(--accent); font-size: 18px;">0</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Win Rate</span>
+            <span class="stat-val" id="sandbox-winrate" style="font-size: 18px;">0%</span>
+          </div>
+          <!-- Row 2 -->
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Net Profit ($)</span>
+            <span class="stat-val" id="sandbox-profit" style="font-size: 18px;">$0.00</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Avg Duration</span>
+            <span class="stat-val" id="sandbox-duration" style="font-size: 18px; color: var(--text-muted);">0m</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Profit Factor</span>
+            <span class="stat-val" id="sandbox-factor" style="font-size: 18px; color: var(--blue);">0.00</span>
+          </div>
+          <div class="stat-card" style="padding: 10px; text-align: center;">
+            <span class="stat-lbl" style="font-size: 8px;">Total Trades</span>
+            <span class="stat-val" id="sandbox-total" style="font-size: 18px; color: var(--text);">0</span>
+          </div>
         </div>
       </div>
     </div>
@@ -831,28 +879,42 @@
             Active Positions Hub
             <span class="badge" id="positions-count-badge">0 Active</span>
           </div>
-          <button id="btn-close-all" class="pos-btn pos-btn-close" style="margin: 0; padding: 4px 10px; font-size: 10px; border-radius: 4px; display: none; width: auto; flex: none;">🚨 Close All</button>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button id="btn-close-all" class="pos-btn pos-btn-close" style="margin: 0; padding: 4px 10px; font-size: 10px; border-radius: 4px; display: none; width: auto; flex: none;">🚨 Close All</button>
+            <span class="widget-collapse-btn" data-target="positions-content">▼</span>
+          </div>
         </div>
-        <div id="positions-list">
-          <div class="no-positions">No active trades are currently running. Waiting for trigger setups...</div>
+        <div class="widget-content" id="positions-content">
+          <div id="positions-list">
+            <div class="no-positions">No active trades are currently running. Waiting for trigger setups...</div>
+          </div>
         </div>
       </div>
 
       <!-- Scanners Tickers -->
       <div class="widget">
-        <div class="widget-title">
-          Live Strategy Scanners
-          <span class="badge" id="scanners-count-badge" style="background:rgba(46,189,133,0.15); color:var(--green); border-color:rgba(46,189,133,0.3)">0 Active Charts</span>
+        <div class="widget-title" style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            Live Strategy Scanners
+            <span class="badge" id="scanners-count-badge" style="background:rgba(46,189,133,0.15); color:var(--green); border-color:rgba(46,189,133,0.3)">0 Active Charts</span>
+          </div>
+          <span class="widget-collapse-btn" data-target="scanners-content">▼</span>
         </div>
-        <div id="scanners-grid">
-          <div class="no-scanners">No active tabs detected scanning tickers. Open Binance Futures charts in other tabs.</div>
+        <div class="widget-content" id="scanners-content">
+          <div id="scanners-grid">
+            <div class="no-scanners">No active tabs detected scanning tickers. Open Binance Futures charts in other tabs.</div>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- Right Column: Configurations -->
       <div class="widget">
-        <div class="widget-title">Global Configurations</div>
+        <div class="widget-title" style="display: flex; align-items: center; justify-content: space-between;">
+          <span>Global Configurations</span>
+          <span class="widget-collapse-btn" data-target="configs-content">▼</span>
+        </div>
+        <div class="widget-content" id="configs-content">
         
         <!-- Sizing Settings -->
         <div class="config-group" style="margin-bottom: 12px;">
@@ -997,33 +1059,75 @@
   <!-- Historical Trades Ledger Table -->
   <div class="widget" style="margin-top: 24px; overflow-x: auto;">
     <div class="widget-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      📜 HISTORICAL TRADES LEDGER
-      <div>
+      <span>📜 HISTORICAL TRADES LEDGER</span>
+      <div style="display: flex; align-items: center; gap: 8px;">
         <button id="ledger-filter-all" class="badge" style="cursor: pointer; background: var(--blue); color: #fff; border: 1px solid var(--blue); margin-right: 4px; padding: 4px 8px; border-radius: 4px; font-size: 9px; font-weight: 800; text-transform: uppercase;">All</button>
         <button id="ledger-filter-real" class="badge" style="cursor: pointer; background: transparent; color: var(--text-muted); border: 1px solid var(--border); margin-right: 4px; padding: 4px 8px; border-radius: 4px; font-size: 9px; font-weight: 800; text-transform: uppercase;">Real</button>
         <button id="ledger-filter-sandbox" class="badge" style="cursor: pointer; background: transparent; color: var(--text-muted); border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-size: 9px; font-weight: 800; text-transform: uppercase;">Sandbox</button>
+        <span class="widget-collapse-btn" data-target="ledger-content">▼</span>
       </div>
     </div>
-    <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 12px;">
-      <thead>
-        <tr style="border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: 700; text-transform: uppercase;">
-          <th style="padding: 10px 8px;">Symbol / Side</th>
-          <th style="padding: 10px 8px;">Type</th>
-          <th style="padding: 10px 8px;">Probability</th>
-          <th style="padding: 10px 8px;">Capital</th>
-          <th style="padding: 10px 8px;">Entry / Exit Price</th>
-          <th style="padding: 10px 8px;">Duration</th>
-          <th style="padding: 10px 8px;">PnL (%)</th>
-          <th style="padding: 10px 8px;">Outcome</th>
-          <th style="padding: 10px 8px;">Date</th>
-        </tr>
-      </thead>
-      <tbody id="ledger-tbody">
-        <tr>
-          <td colspan="9" style="text-align: center; padding: 20px; color: var(--text-muted);">No trade records found. Waiting for signal execution...</td>
-        </tr>
-      </tbody>
-    </table>
+    
+    <div class="widget-content" id="ledger-content">
+      <div class="ledger-toolbar" style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; padding: 0 8px;">
+        <!-- Page Size -->
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Show</span>
+          <select id="ledger-page-size" style="background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 4px 6px; font-size: 11px; outline: none; cursor: pointer;">
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+          </select>
+          <span style="font-size: 11px; color: var(--text-muted); font-weight: 700;">entries</span>
+        </div>
+        
+        <!-- Outcome Filter -->
+        <div style="display: flex; align-items: center; gap: 6px; margin-left: 20px;">
+          <span style="font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Outcome:</span>
+          <select id="ledger-filter-outcome" style="background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 4px 8px; font-size: 11px; outline: none; cursor: pointer;">
+            <option value="ALL">All Outcomes</option>
+            <option value="WIN">WIN</option>
+            <option value="LOSS">LOSS</option>
+            <option value="TIMEOUT">TIMEOUT</option>
+            <option value="INVALIDATED">INVALIDATED</option>
+          </select>
+        </div>
+
+        <!-- Search Input -->
+        <input type="text" id="ledger-search" placeholder="Search symbol..." style="background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 5px 10px; font-size: 11px; outline: none; width: 160px; margin-left: auto;">
+      </div>
+
+      <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 12px;">
+        <thead>
+          <tr style="border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: 700; text-transform: uppercase;">
+            <th style="padding: 10px 8px; cursor: pointer; user-select: none;" id="sort-symbol">Symbol / Side <span class="sort-icon">↕</span></th>
+            <th style="padding: 10px 8px;">Type</th>
+            <th style="padding: 10px 8px; cursor: pointer; user-select: none;" id="sort-prob">Probability <span class="sort-icon">↕</span></th>
+            <th style="padding: 10px 8px; cursor: pointer; user-select: none;" id="sort-cap">Capital <span class="sort-icon">↕</span></th>
+            <th style="padding: 10px 8px;">Entry / Exit Price</th>
+            <th style="padding: 10px 8px; cursor: pointer; user-select: none;" id="sort-duration">Duration <span class="sort-icon">↕</span></th>
+            <th style="padding: 10px 8px; cursor: pointer; user-select: none;" id="sort-pnl">PnL (%) <span class="sort-icon">↕</span></th>
+            <th style="padding: 10px 8px;">Outcome</th>
+            <th style="padding: 10px 8px; cursor: pointer; user-select: none;" id="sort-date">Date <span class="sort-icon">↕</span></th>
+          </tr>
+        </thead>
+        <tbody id="ledger-tbody">
+          <tr>
+            <td colspan="9" style="text-align: center; padding: 20px; color: var(--text-muted);">No trade records found. Waiting for signal execution...</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="ledger-pagination" style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding: 0 8px;">
+        <div style="font-size: 11px; color: var(--text-muted);">
+          Showing <span id="ledger-page-start">0</span> to <span id="ledger-page-end">0</span> of <span id="ledger-total-count">0</span> entries
+        </div>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button id="ledger-btn-prev" style="background: var(--border); border: none; border-radius: 4px; color: var(--text); padding: 5px 10px; font-size: 11px; cursor: pointer; font-weight: 700; transition: background-color 0.2s;">Previous</button>
+          <button id="ledger-btn-next" style="background: var(--border); border: none; border-radius: 4px; color: var(--text); padding: 5px 10px; font-size: 11px; cursor: pointer; font-weight: 700; transition: background-color 0.2s;">Next</button>
+        </div>
+      </div>
+    </div> <!-- .widget-content -->
   </div>
 
   <script src="dashboard.js"></script>

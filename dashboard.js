@@ -149,6 +149,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let dbSignals = [];
   let ledgerFilter = 'ALL';
+  let activeTickerFilter = 'ALL';
+  let ledgerSortColumn = 'date';
+  let ledgerSortDirection = 'desc';
+  let ledgerSearchQuery = '';
+  let ledgerOutcomeFilter = 'ALL';
+  let ledgerPageSize = 25;
+  let ledgerCurrentPage = 1;
 
   ledgerFilterAll.addEventListener('click', () => {
     ledgerFilter = 'ALL';
@@ -184,6 +191,157 @@ document.addEventListener('DOMContentLoaded', () => {
         b.el.style.borderColor = 'var(--border)';
         b.el.style.color = 'var(--text-muted)';
       }
+    });
+  }
+
+  // --- Global Ticker Filter ---
+  const globalTickerFilter = document.getElementById('global-ticker-filter');
+  if (globalTickerFilter) {
+    globalTickerFilter.addEventListener('change', (e) => {
+      activeTickerFilter = e.target.value;
+      compileStatsFromSignals(dbSignals);
+      ledgerCurrentPage = 1;
+      renderLedgerTable();
+    });
+  }
+
+  function populateTickerFilter(signals) {
+    const filterSelect = document.getElementById('global-ticker-filter');
+    if (!filterSelect) return;
+    const currentVal = filterSelect.value || 'ALL';
+    
+    const symbols = new Set();
+    signals.forEach(s => {
+      if (s.symbol) symbols.add(s.symbol.toUpperCase());
+    });
+    
+    Object.keys(activeTrades).forEach(sym => {
+      symbols.add(sym.toUpperCase());
+    });
+    
+    filterSelect.innerHTML = '<option value="ALL">All Tickers</option>';
+    Array.from(symbols).sort().forEach(sym => {
+      const opt = document.createElement('option');
+      opt.value = sym;
+      opt.textContent = sym;
+      filterSelect.appendChild(opt);
+    });
+    
+    if (symbols.has(currentVal)) {
+      filterSelect.value = currentVal;
+    } else {
+      filterSelect.value = 'ALL';
+      activeTickerFilter = 'ALL';
+    }
+  }
+
+  // --- Collapsible Dashboard Sections ---
+  document.querySelectorAll('.widget-collapse-btn').forEach(btn => {
+    const targetId = btn.getAttribute('data-target');
+    const isCollapsed = localStorage.getItem('collapse_' + targetId) === 'true';
+    const target = document.getElementById(targetId);
+    if (target) {
+      if (isCollapsed) {
+        target.classList.add('collapsed');
+        btn.textContent = '▲';
+      } else {
+        target.classList.remove('collapsed');
+        btn.textContent = '▼';
+      }
+    }
+    btn.addEventListener('click', () => {
+      const currentlyCollapsed = target.classList.toggle('collapsed');
+      btn.textContent = currentlyCollapsed ? '▲' : '▼';
+      localStorage.setItem('collapse_' + targetId, currentlyCollapsed ? 'true' : 'false');
+    });
+  });
+
+  // --- Historical Ledger Advanced Sorting, Filtering, and Pagination ---
+  const sortHeaders = [
+    { id: 'sort-symbol', col: 'symbol' },
+    { id: 'sort-prob', col: 'prob' },
+    { id: 'sort-cap', col: 'cap' },
+    { id: 'sort-duration', col: 'duration' },
+    { id: 'sort-pnl', col: 'pnl' },
+    { id: 'sort-date', col: 'date' }
+  ];
+
+  sortHeaders.forEach(sh => {
+    const el = document.getElementById(sh.id);
+    if (el) {
+      el.addEventListener('click', () => {
+        if (ledgerSortColumn === sh.col) {
+          ledgerSortDirection = ledgerSortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+          ledgerSortColumn = sh.col;
+          ledgerSortDirection = 'desc';
+        }
+        updateSortIcons();
+        renderLedgerTable();
+      });
+    }
+  });
+
+  function updateSortIcons() {
+    sortHeaders.forEach(sh => {
+      const el = document.getElementById(sh.id);
+      if (el) {
+        const iconEl = el.querySelector('.sort-icon');
+        if (iconEl) {
+          if (ledgerSortColumn === sh.col) {
+            iconEl.textContent = ledgerSortDirection === 'asc' ? '▲' : '▼';
+            iconEl.style.color = 'var(--accent)';
+          } else {
+            iconEl.textContent = '↕';
+            iconEl.style.color = 'var(--text-muted)';
+          }
+        }
+      }
+    });
+  }
+
+  const btnPrev = document.getElementById('ledger-btn-prev');
+  const btnNext = document.getElementById('ledger-btn-next');
+
+  if (btnPrev) {
+    btnPrev.addEventListener('click', () => {
+      if (ledgerCurrentPage > 1) {
+        ledgerCurrentPage--;
+        renderLedgerTable();
+      }
+    });
+  }
+  if (btnNext) {
+    btnNext.addEventListener('click', () => {
+      ledgerCurrentPage++;
+      renderLedgerTable();
+    });
+  }
+
+  const ledgerPageSizeSelect = document.getElementById('ledger-page-size');
+  if (ledgerPageSizeSelect) {
+    ledgerPageSizeSelect.addEventListener('change', (e) => {
+      ledgerPageSize = parseInt(e.target.value) || 25;
+      ledgerCurrentPage = 1;
+      renderLedgerTable();
+    });
+  }
+
+  const ledgerOutcomeSelect = document.getElementById('ledger-filter-outcome');
+  if (ledgerOutcomeSelect) {
+    ledgerOutcomeSelect.addEventListener('change', (e) => {
+      ledgerOutcomeFilter = e.target.value;
+      ledgerCurrentPage = 1;
+      renderLedgerTable();
+    });
+  }
+
+  const ledgerSearchInput = document.getElementById('ledger-search');
+  if (ledgerSearchInput) {
+    ledgerSearchInput.addEventListener('input', (e) => {
+      ledgerSearchQuery = e.target.value.trim().toUpperCase();
+      ledgerCurrentPage = 1;
+      renderLedgerTable();
     });
   }
 
@@ -565,7 +723,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // 6. Fetch live ticker prices for PnL
   function fetchPrices() {
     const symbols = Object.keys(activeTrades);
-    if (symbols.length === 0) return;
+    if (symbols.length === 0) {
+      updateDashboardEquity();
+      return;
+    }
 
     symbols.forEach(sym => {
       fetch(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${sym}`)
@@ -610,8 +771,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (keys.length === 0) {
       container.innerHTML = `<div class="no-positions">No active trades are currently running. Waiting for trigger setups...</div>`;
+      updateDashboardEquity();
       return;
     }
+
+    const limit = timeoutCandlesInput ? (parseInt(timeoutCandlesInput.value) || 12) : 12;
 
     let html = '';
     keys.forEach(sym => {
@@ -626,7 +790,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <span class="pos-side-badge ${sideClass}">${pos.direction}</span>
               <span class="pos-symbol">${pos.symbol}</span>
             </div>
-            <span class="pos-age">Age: <span id="pos-age-${sym}">${pos.elapsedCandles || 0}</span>/12 candles</span>
+            <span class="pos-age">Age: <span id="pos-age-${sym}">${pos.elapsedCandles || 0}</span>/${limit} candles</span>
           </div>
 
           <div class="pos-grid">
@@ -635,12 +799,20 @@ document.addEventListener('DOMContentLoaded', () => {
               <div class="pos-val">$${parseFloat(pos.entry).toFixed(pos.pricePrecision !== undefined ? pos.pricePrecision : 2)}</div>
             </div>
             <div class="pos-cell">
+              <div class="pos-lbl">Mark Price</div>
+              <div class="pos-val" style="color: var(--accent);" id="pos-mark-${sym}">—</div>
+            </div>
+            <div class="pos-cell">
               <div class="pos-lbl">Take Profit</div>
               <div class="pos-val" style="color: var(--green);">$${parseFloat(pos.target1).toFixed(pos.pricePrecision !== undefined ? pos.pricePrecision : 2)}</div>
             </div>
             <div class="pos-cell">
               <div class="pos-lbl">Stop Loss</div>
               <div class="pos-val" style="color: var(--red);">$${parseFloat(pos.stopLoss).toFixed(pos.pricePrecision !== undefined ? pos.pricePrecision : 2)}</div>
+            </div>
+            <div class="pos-cell">
+              <div class="pos-lbl">Position Size</div>
+              <div class="pos-val" id="pos-size-${sym}">${pos.positionSize} units</div>
             </div>
             <div class="pos-cell">
               <div class="pos-lbl">Leverage</div>
@@ -732,9 +904,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
+      const pPrec = pos.pricePrecision !== undefined ? pos.pricePrecision : 2;
+      const markEl = document.getElementById(`pos-mark-${sym}`);
+      if (markEl) markEl.textContent = `$${tickPrice.toFixed(pPrec)}`;
+
       const pnlPct = isLong
         ? ((tickPrice - entry) / entry) * 100 * leverage
         : ((entry - tickPrice) / entry) * 100 * leverage;
+
+      const sizePct = isLong
+        ? ((tickPrice - entry) / entry) * 100
+        : ((entry - tickPrice) / entry) * 100;
 
       const pnlDollar = isLong
         ? (tickPrice - entry) * posSize
@@ -742,7 +922,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (pnlEl) {
         const sign = pnlPct >= 0 ? '+' : '';
-        pnlEl.textContent = `${sign}${pnlPct.toFixed(2)}% | ${sign}$${pnlDollar.toFixed(2)}`;
+        const sizeSign = sizePct >= 0 ? '+' : '';
+        pnlEl.textContent = `${sign}${pnlPct.toFixed(2)}% (ROE) | ${sizeSign}${sizePct.toFixed(2)}% (Size) | ${sign}$${pnlDollar.toFixed(2)}`;
         pnlEl.style.color = pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
       }
 
@@ -793,7 +974,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (liqEl) {
-          const pPrec = pos.pricePrecision !== undefined ? pos.pricePrecision : 2;
           liqEl.textContent = `$${liqPrice.toFixed(pPrec)}`;
         }
       } else {
@@ -816,9 +996,53 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (liqEl) {
-          const pPrec = pos.pricePrecision !== undefined ? pos.pricePrecision : 2;
           liqEl.textContent = `$${liqPrice.toFixed(pPrec)}`;
         }
+      }
+
+      updateDashboardEquity();
+    });
+  }
+
+  function updateDashboardEquity() {
+    chrome.storage.local.get(null, (items) => {
+      const isSandbox = items.sandboxMode === true;
+      const walletBalance = isSandbox
+        ? (items.sandboxWalletBalance !== undefined ? items.sandboxWalletBalance : 1000)
+        : (items.walletBalance !== undefined ? items.walletBalance : 1000);
+
+      const activeKeys = Object.keys(items).filter(k => k.startsWith('activeTrade_'));
+      const activeList = activeKeys
+        .map(k => items[k])
+        .filter(t => t && (t.status === 'SANDBOX_ACTIVE') === isSandbox);
+
+      let totalUnrealizedPnl = 0;
+      activeList.forEach(t => {
+        const tSym = t.symbol;
+        const tTickPrice = priceCache[tSym] || parseFloat(t.entry) || 0;
+        const tEntry = parseFloat(t.entry) || 0;
+        const tSize = parseFloat(t.positionSize) || 0;
+        const tIsLong = t.direction === 'LONG';
+
+        if (tTickPrice > 0 && tEntry > 0 && tSize > 0) {
+          const tUpnl = tIsLong
+            ? (tTickPrice - tEntry) * tSize
+            : (tEntry - tTickPrice) * tSize;
+          totalUnrealizedPnl += tUpnl;
+        }
+      });
+
+      const equity = walletBalance + totalUnrealizedPnl;
+      if (isSandbox) {
+        const sandEquityEl = document.getElementById('sandbox-equity');
+        if (sandEquityEl) sandEquityEl.textContent = equity.toFixed(2);
+        const sandWalletEl = document.getElementById('sandbox-wallet-balance');
+        if (sandWalletEl) sandWalletEl.textContent = walletBalance.toFixed(2);
+      } else {
+        const realEquityEl = document.getElementById('real-equity');
+        if (realEquityEl) realEquityEl.textContent = equity.toFixed(2);
+        const realWalletEl = document.getElementById('real-wallet-balance');
+        if (realWalletEl) realWalletEl.textContent = walletBalance.toFixed(2);
       }
     });
   }
@@ -974,6 +1198,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (Array.isArray(signals)) {
           signals.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           dbSignals = signals;
+          populateTickerFilter(signals);
           compileStatsFromSignals(signals);
           renderLedgerTable();
         }
@@ -1008,6 +1233,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const chronoSignals = [...signals]
         .filter(s => new Date(s.createdAt).getTime() >= lastCleared)
+        .filter(s => activeTickerFilter === 'ALL' || (s.symbol && s.symbol.toUpperCase() === activeTickerFilter))
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
       for (const sig of chronoSignals) {
@@ -1181,17 +1407,111 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get('journalLastClearedTime', (items) => {
       const lastCleared = items.journalLastClearedTime || 0;
 
+      // 1. Initial filter by cleared time
       let filtered = dbSignals.filter(s => {
         return new Date(s.createdAt).getTime() >= lastCleared;
       });
 
+      // 2. Filter by global ticker focus
+      if (activeTickerFilter !== 'ALL') {
+        filtered = filtered.filter(s => s.symbol && s.symbol.toUpperCase() === activeTickerFilter);
+      }
+
+      // 3. Filter by type (REAL vs SANDBOX)
       if (ledgerFilter === 'REAL') {
         filtered = filtered.filter(s => s.actualOutcome !== 'SANDBOX' && !s.status.startsWith('SANDBOX_'));
       } else if (ledgerFilter === 'SANDBOX') {
         filtered = filtered.filter(s => s.actualOutcome === 'SANDBOX' || s.status.startsWith('SANDBOX_'));
       }
 
-      if (filtered.length === 0) {
+      // 4. Filter by outcome selector
+      if (ledgerOutcomeFilter !== 'ALL') {
+        filtered = filtered.filter(s => {
+          let status = s.status;
+          const isSand = s.actualOutcome === 'SANDBOX' || s.status.startsWith('SANDBOX_');
+          let outcome = isSand ? status.replace('SANDBOX_', '') : status;
+          const pnlVal = parseFloat(s.pnlPercentage || '0.0000');
+          if (outcome === 'TIMEOUT' || outcome === 'INVALIDATED') {
+            outcome = pnlVal >= 0 ? 'WIN' : 'LOSS';
+          }
+          return outcome === ledgerOutcomeFilter;
+        });
+      }
+
+      // 5. Filter by Search Query (Symbol)
+      if (ledgerSearchQuery) {
+        filtered = filtered.filter(s => s.symbol && s.symbol.toUpperCase().includes(ledgerSearchQuery));
+      }
+
+      // 6. Sort data
+      filtered.sort((a, b) => {
+        let valA, valB;
+        if (ledgerSortColumn === 'symbol') {
+          valA = a.symbol || '';
+          valB = b.symbol || '';
+        } else if (ledgerSortColumn === 'prob') {
+          valA = parseFloat(a.probability) || 0;
+          valB = parseFloat(b.probability) || 0;
+        } else if (ledgerSortColumn === 'cap') {
+          const aRisk = parseFloat(a.riskAmount || '20');
+          const aCap = parseFloat(a.positionSize) * parseFloat(a.entryPrice) / (parseFloat(a.leverage) || 3);
+          valA = isNaN(aCap) || aCap <= 0 || !isFinite(aCap) ? aRisk : aCap;
+
+          const bRisk = parseFloat(b.riskAmount || '20');
+          const bCap = parseFloat(b.positionSize) * parseFloat(b.entryPrice) / (parseFloat(b.leverage) || 3);
+          valB = isNaN(bCap) || bCap <= 0 || !isFinite(bCap) ? bRisk : bCap;
+        } else if (ledgerSortColumn === 'duration') {
+          valA = (a.resolvedAt && a.createdAt) ? new Date(a.resolvedAt).getTime() - new Date(a.createdAt).getTime() : 0;
+          valB = (b.resolvedAt && b.createdAt) ? new Date(b.resolvedAt).getTime() - new Date(b.createdAt).getTime() : 0;
+        } else if (ledgerSortColumn === 'pnl') {
+          valA = parseFloat(a.pnlPercentage || '0.0000');
+          valB = parseFloat(b.pnlPercentage || '0.0000');
+        } else {
+          // Default sorting by date
+          valA = new Date(a.createdAt).getTime();
+          valB = new Date(b.createdAt).getTime();
+        }
+
+        if (typeof valA === 'string') {
+          return ledgerSortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else {
+          return ledgerSortDirection === 'asc' ? valA - valB : valB - valA;
+        }
+      });
+
+      // 7. Paginate data
+      const totalCount = filtered.length;
+      const totalPages = Math.ceil(totalCount / ledgerPageSize);
+
+      if (ledgerCurrentPage > totalPages) {
+        ledgerCurrentPage = Math.max(1, totalPages);
+      }
+
+      const startIdx = (ledgerCurrentPage - 1) * ledgerPageSize;
+      const endIdx = Math.min(startIdx + ledgerPageSize, totalCount);
+
+      // Update Pagination DOM labels
+      const startCountEl = document.getElementById('ledger-page-start');
+      const endCountEl = document.getElementById('ledger-page-end');
+      const totalCountEl = document.getElementById('ledger-total-count');
+      if (startCountEl) startCountEl.textContent = totalCount === 0 ? 0 : startIdx + 1;
+      if (endCountEl) endCountEl.textContent = endIdx;
+      if (totalCountEl) totalCountEl.textContent = totalCount;
+
+      if (btnPrev) {
+        btnPrev.disabled = ledgerCurrentPage <= 1;
+        btnPrev.style.opacity = ledgerCurrentPage <= 1 ? '0.5' : '1';
+        btnPrev.style.cursor = ledgerCurrentPage <= 1 ? 'not-allowed' : 'pointer';
+      }
+      if (btnNext) {
+        btnNext.disabled = ledgerCurrentPage >= totalPages;
+        btnNext.style.opacity = ledgerCurrentPage >= totalPages ? '0.5' : '1';
+        btnNext.style.cursor = ledgerCurrentPage >= totalPages ? 'not-allowed' : 'pointer';
+      }
+
+      const pageItems = filtered.slice(startIdx, endIdx);
+
+      if (pageItems.length === 0) {
         ledgerTbody.innerHTML = `
           <tr>
             <td colspan="9" style="text-align: center; padding: 20px; color: var(--text-muted);">No matching trade logs found.</td>
@@ -1201,7 +1521,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       let html = '';
-      filtered.forEach(sig => {
+      pageItems.forEach(sig => {
         const isSand = sig.actualOutcome === 'SANDBOX' || sig.status.startsWith('SANDBOX_');
         const sideClass = sig.direction === 'LONG' ? 'color: var(--green);' : 'color: var(--red);';
         const typeLabel = isSand 

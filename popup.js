@@ -107,12 +107,74 @@ function updateJournalTitle(isSandbox) {
     titleEl.innerHTML = `Performance Journal <span class="badge" style="background: rgba(46,189,133,0.15); color: var(--green); border-color: rgba(46,189,133,0.3);">Real</span> ${badgeHTML} ${walletSpan}`;
   }
 
-  chrome.storage.local.get({ walletBalance: 1000, sandboxWalletBalance: 1000 }, (items) => {
-    const bal = isSandbox ? items.sandboxWalletBalance : items.walletBalance;
-    const balanceEl = document.getElementById('journalWalletBalance');
-    if (balanceEl) {
-      balanceEl.textContent = `Wallet Balance: $${bal.toFixed(2)}`;
+  updatePopupEquity();
+}
+
+function updatePopupEquity() {
+  chrome.storage.local.get(null, (items) => {
+    const isSandbox = items.sandboxMode || false;
+    const walletBalance = isSandbox ? (items.sandboxWalletBalance || 1000) : (items.walletBalance || 1000);
+    
+    const activeTradesList = [];
+    for (const key in items) {
+      if (key.startsWith('activeTrade_')) {
+        const t = items[key];
+        if (t && (t.status === 'ACTIVE' || t.status === 'SANDBOX_ACTIVE')) {
+          const tSand = t.status === 'SANDBOX_ACTIVE' || (t.status && t.status.startsWith('SANDBOX_'));
+          if (tSand === isSandbox) {
+            activeTradesList.push(t);
+          }
+        }
+      }
     }
+
+    if (activeTradesList.length === 0) {
+      const balanceEl = document.getElementById('journalWalletBalance');
+      if (balanceEl) {
+        balanceEl.textContent = `Wallet: $${walletBalance.toFixed(2)} | Equity: $${walletBalance.toFixed(2)}`;
+      }
+      return;
+    }
+
+    const priceUrl = `https://fapi.binance.com/fapi/v1/ticker/price`;
+    fetch(priceUrl)
+      .then(r => {
+        if (!r.ok) throw new Error();
+        return r.json();
+      })
+      .catch(() => {
+        const spotUrl = `https://api.binance.com/api/v3/ticker/price`;
+        return fetch(spotUrl).then(r => r.json());
+      })
+      .then(data => {
+        const priceMap = {};
+        data.forEach(item => {
+          priceMap[item.symbol] = parseFloat(item.price);
+        });
+
+        let totalUnrealizedPnl = 0;
+        activeTradesList.forEach(t => {
+          const tTick = priceMap[t.symbol] || parseFloat(t.entry) || 0;
+          const tEntry = parseFloat(t.entry) || 0;
+          const tSize = parseFloat(t.positionSize) || 0;
+          const tIsLong = t.direction === 'LONG';
+
+          const uPnL = tIsLong
+            ? (tTick - tEntry) * tSize
+            : (tEntry - tTick) * tSize;
+
+          totalUnrealizedPnl += uPnL;
+        });
+
+        const equity = walletBalance + totalUnrealizedPnl;
+        const balanceEl = document.getElementById('journalWalletBalance');
+        if (balanceEl) {
+          balanceEl.textContent = `Wallet: $${walletBalance.toFixed(2)} | Equity: $${equity.toFixed(2)}`;
+        }
+      })
+      .catch(err => {
+        console.error("Popup equity fetch error:", err);
+      });
   });
 }
 
@@ -274,17 +336,26 @@ function renderActiveTrade(trade) {
           return;
         }
 
+        const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
+        document.getElementById('atpMarkPrice').textContent = `$${tick.toFixed(pPrec)}`;
+        document.getElementById('atpSize').textContent = `${posSize} units`;
+
         const pnlPct = isLong
           ? ((tick - entry) / entry) * 100 * leverage
           : ((entry - tick) / entry) * 100 * leverage;
+
+        const sizePct = isLong
+          ? ((tick - entry) / entry) * 100
+          : ((entry - tick) / entry) * 100;
 
         const pnlDollar = isLong
           ? (tick - entry) * posSize
           : (entry - tick) * posSize;
 
         const sign  = pnlPct >= 0 ? '+' : '';
+        const sizeSign = sizePct >= 0 ? '+' : '';
         const color = pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
-        document.getElementById('atpPnl').textContent = `${sign}${pnlPct.toFixed(2)}%  |  ${sign}$${pnlDollar.toFixed(2)}`;
+        document.getElementById('atpPnl').textContent = `${sign}${pnlPct.toFixed(2)}% (ROE)  |  ${sizeSign}${sizePct.toFixed(2)}% (Size)  |  ${sign}$${pnlDollar.toFixed(2)}`;
         document.getElementById('atpPnl').style.color = color;
 
         if (marginMode === 'CROSS') {
@@ -434,11 +505,13 @@ function refreshPopupActiveTrade() {
   getActiveTabSymbol((symbol) => {
     if (!symbol) {
       renderActiveTrade(null);
+      updatePopupEquity();
       return;
     }
     chrome.storage.local.get('activeTrade_' + symbol, (res) => {
       const trade = res['activeTrade_' + symbol] || null;
       renderActiveTrade(trade);
+      updatePopupEquity();
     });
   });
 }
