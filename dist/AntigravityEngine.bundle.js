@@ -21,8 +21,36 @@ var AntigravityCore = (() => {
   // src/engine/AntigravityEngine.ts
   var AntigravityEngine_exports = {};
   __export(AntigravityEngine_exports, {
-    AntigravityEngine: () => AntigravityEngine
+    AntigravityEngine: () => AntigravityEngine,
+    MarketRegime: () => MarketRegime,
+    MarketState: () => MarketState
   });
+
+  // src/engine/Types.ts
+  var MarketState = /* @__PURE__ */ ((MarketState2) => {
+    MarketState2["ACCUMULATION"] = "ACCUMULATION";
+    MarketState2["LIQUIDITY_SWEEP"] = "LIQUIDITY_SWEEP";
+    MarketState2["DISPLACEMENT"] = "DISPLACEMENT";
+    MarketState2["RETRACEMENT"] = "RETRACEMENT";
+    MarketState2["EXECUTION_WINDOW"] = "EXECUTION_WINDOW";
+    MarketState2["EXPANSION"] = "EXPANSION";
+    MarketState2["REVERSAL"] = "REVERSAL";
+    MarketState2["CHOPPY"] = "CHOPPY";
+    MarketState2["NO_TRADE"] = "NO_TRADE";
+    return MarketState2;
+  })(MarketState || {});
+  var MarketRegime = /* @__PURE__ */ ((MarketRegime2) => {
+    MarketRegime2["TRENDING"] = "TRENDING";
+    MarketRegime2["MEAN_REVERTING"] = "MEAN_REVERTING";
+    MarketRegime2["CHOPPY"] = "CHOPPY";
+    MarketRegime2["EXPANSION"] = "EXPANSION";
+    MarketRegime2["COMPRESSION"] = "COMPRESSION";
+    MarketRegime2["HIGH_VOLATILITY"] = "HIGH_VOLATILITY";
+    MarketRegime2["LOW_LIQUIDITY"] = "LOW_LIQUIDITY";
+    MarketRegime2["NEWS_EVENT"] = "NEWS_EVENT";
+    MarketRegime2["LIQUIDATION_CASCADE"] = "LIQUIDATION_CASCADE";
+    return MarketRegime2;
+  })(MarketRegime || {});
 
   // src/engine/EventSourcing.ts
   var EventLog = class _EventLog {

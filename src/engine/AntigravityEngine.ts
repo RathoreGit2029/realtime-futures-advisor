@@ -1,3 +1,4 @@
+export * from './Types';
 import { MarketContext, SystemEvent } from './Types';
 import { EventLog } from './EventSourcing';
 import { MarketStateMachine } from './StateMachine';
