@@ -78,7 +78,7 @@ export class ConstraintEngine {
           type: 'ConstraintRejected',
           correlationId: context.symbol,
           payload: { constraintId: constraint.id, reason: result.reason },
-          marketSnapshot: context
+          marketContextSnapshot: context
         });
 
         const totalEvaluationTime = Date.now() - startTime;
@@ -99,7 +99,7 @@ export class ConstraintEngine {
         type: 'ConstraintPassed',
         correlationId: context.symbol,
         payload: { constraintId: constraint.id },
-        marketSnapshot: context
+        marketContextSnapshot: context
       });
     }
 

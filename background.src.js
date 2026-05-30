@@ -24,6 +24,45 @@ function getOrCreateEngine() {
   if (!globalThis._swEngine) {
     globalThis._swEngine = new AntigravityCore.AntigravityEngine();
     console.log('⚡ Antigravity SW: Engine instance created.');
+
+    const engine = globalThis._swEngine;
+    const logger = AntigravityCore.EventLog.getInstance();
+
+    // Register state getter for checkpoints snapshot
+    logger.registerStateGetter(() => {
+      return {
+        probabilityState: engine.probEngine.serializeState(),
+        journalStats: state.journalStats,
+        sandboxJournalStats: state.sandboxJournalStats,
+        consecutiveLosses: state.consecutiveLosses,
+        walletBalance: state.walletBalance,
+        sandboxWalletBalance: state.sandboxWalletBalance
+      };
+    });
+
+    // Register state restorer for checkpoint hydration
+    logger.registerStateRestorer((snapshotState) => {
+      if (!snapshotState) return;
+      if (snapshotState.probabilityState) {
+        engine.probEngine.deserializeState(snapshotState.probabilityState);
+        console.log('⚡ Event Sourcing: Bayesian probability restored from snapshot.');
+      }
+      if (snapshotState.journalStats) state.journalStats = snapshotState.journalStats;
+      if (snapshotState.sandboxJournalStats) state.sandboxJournalStats = snapshotState.sandboxJournalStats;
+      if (snapshotState.consecutiveLosses !== undefined) state.consecutiveLosses = snapshotState.consecutiveLosses;
+      if (snapshotState.walletBalance !== undefined) state.walletBalance = snapshotState.walletBalance;
+      if (snapshotState.sandboxWalletBalance !== undefined) state.sandboxWalletBalance = snapshotState.sandboxWalletBalance;
+      console.log('💾 Event Sourcing: State restored from snapshot checkpoint.');
+    });
+
+    // Trigger async hydration from backend SQLite DB
+    logger.hydrate()
+      .then(() => {
+        console.log('⚡ Event Sourcing: Hydration complete from backend SQLite database.');
+      })
+      .catch(e => {
+        console.warn('⚠️ Event Sourcing: Hydration failed:', e);
+      });
   }
   return globalThis._swEngine;
 }

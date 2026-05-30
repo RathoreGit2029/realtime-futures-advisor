@@ -34,14 +34,26 @@ export class EventLog {
   }
 
   public append(
-    event: Omit<SystemEvent, 'timestamp' | 'eventId' | 'sequenceNumber' | 'deterministicHash' | 'previousEventHash'>
+    event: Omit<SystemEvent, 'exchangeTimestamp' | 'receiveTimestamp' | 'eventId' | 'sequenceNumber' | 'deterministicHash' | 'previousEventHash' | 'eventVersion'>
   ): SystemEvent {
     return this.eventLog.append(
       event.type,
       event.correlationId,
       event.payload,
-      event.marketSnapshot
+      event.marketContextSnapshot
     );
+  }
+
+  public async hydrate(): Promise<void> {
+    await this.eventLog.hydrate();
+  }
+
+  public registerStateGetter(getter: () => any): void {
+    this.eventLog.registerStateGetter(getter);
+  }
+
+  public registerStateRestorer(restorer: (state: any) => void): void {
+    this.eventLog.registerStateRestorer(restorer);
   }
 
   public getEvents(filter?: {

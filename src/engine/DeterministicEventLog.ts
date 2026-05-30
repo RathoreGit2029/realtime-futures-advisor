@@ -35,15 +35,19 @@ export class DeterministicEventLog {
   private lastEventHash: string = '';
   private sequenceCounter: number = 0;
   private clock: Clock;
-  
-  /** Maximum events in memory (archived events are persisted) */
-  private static readonly MAX_MEMORY_EVENTS = 10000;
-  
-  /** Archive threshold - when to start archiving old events */
-  private static readonly ARCHIVE_THRESHOLD = 5000;
+  private stateGetter?: () => any;
+  private stateRestorer?: (state: any) => void;
 
   constructor(clock: Clock) {
     this.clock = clock;
+  }
+
+  public registerStateGetter(getter: () => any): void {
+    this.stateGetter = getter;
+  }
+
+  public registerStateRestorer(restorer: (state: any) => void): void {
+    this.stateRestorer = restorer;
   }
 
   /**
@@ -53,30 +57,140 @@ export class DeterministicEventLog {
     type: string,
     correlationId: string,
     payload: any,
-    marketSnapshot?: MarketContext
+    marketContextSnapshot?: MarketContext
   ): SystemEvent {
     const timestamp = this.clock.now();
-    const sequenceNumber = this.sequenceCounter++;
+    const sequenceNumber = this.sequenceCounter;
+
+    // Strict sequence check
+    if (this.events.length > 0) {
+      const last = this.events[this.events.length - 1];
+      if (sequenceNumber !== last.sequenceNumber + 1) {
+        throw new Error(`State violation: Sequence jump detected. Expected: ${last.sequenceNumber + 1}, Got: ${sequenceNumber}`);
+      }
+    }
+    
     const eventId = `${correlationId}-${sequenceNumber}`;
     
     const event = createSystemEvent({
-      timestamp,
+      exchangeTimestamp: timestamp,
+      receiveTimestamp: Date.now(),
       sequenceNumber,
       eventId,
       correlationId,
       type,
       payload,
-      marketSnapshot,
+      marketContextSnapshot,
+      eventVersion: 1,
       previousEventHash: this.lastEventHash
     });
     
     this.events.push(event);
+    this.sequenceCounter++;
     this.lastEventHash = event.deterministicHash;
     
-    // Manage memory bounds
-    this.manageMemoryBounds();
+    // Sync to SQLite Authoritative Store
+    this.postEventToBackend(event);
+
+    // Snapshot Checkpointing Pipeline
+    if (sequenceNumber > 0 && sequenceNumber % 10000 === 0) {
+      this.triggerSnapshotCheckpoint(sequenceNumber);
+    }
     
     return event;
+  }
+
+  private postEventToBackend(event: SystemEvent): void {
+    if (typeof fetch === 'undefined') return;
+
+    fetch('http://localhost:4000/api/advisor/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(event)
+    })
+    .then(res => {
+      if (!res.ok) {
+        console.warn(`[Event Store] Failed to sync event ${event.sequenceNumber}: ${res.status}`);
+      }
+    })
+    .catch(err => {
+      console.warn(`[Event Store] Backend unreachable for event ${event.sequenceNumber}:`, err.message);
+    });
+  }
+
+  private triggerSnapshotCheckpoint(sequenceNumber: number): void {
+    if (typeof fetch === 'undefined' || !this.stateGetter) return;
+
+    try {
+      const stateData = this.stateGetter();
+      fetch('http://localhost:4000/api/advisor/snapshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sequenceNumber,
+          stateData,
+          timestamp: Date.now()
+        })
+      })
+      .then(res => {
+        if (res.ok) {
+          console.log(`[Event Store] Snapshot checkpoint created at sequence ${sequenceNumber}`);
+        }
+      })
+      .catch(() => {});
+    } catch (e) {
+      console.error('[Event Store] Checkpoint snapshot generation failed:', e);
+    }
+  }
+
+  /**
+   * Hydrates the Event Log from the SQLite backend store
+   */
+  public async hydrate(): Promise<void> {
+    if (typeof fetch === 'undefined') return;
+
+    try {
+      // 1. Fetch latest snapshot
+      const snapshotRes = await fetch('http://localhost:4000/api/advisor/snapshots/latest');
+      let startSeq = 0;
+      let stateData = null;
+
+      if (snapshotRes.ok) {
+        const snapshot = await snapshotRes.json();
+        if (snapshot && typeof snapshot.sequenceNumber === 'number') {
+          startSeq = snapshot.sequenceNumber + 1;
+          stateData = snapshot.stateData;
+          console.log(`[Event Store] Hydrating from latest snapshot at sequence ${snapshot.sequenceNumber}`);
+        }
+      }
+
+      // 2. Fetch subsequent events
+      const eventsRes = await fetch(`http://localhost:4000/api/advisor/events?fromSequence=${startSeq}`);
+      if (eventsRes.ok) {
+        const events = await eventsRes.json();
+        if (Array.isArray(events)) {
+          if (events.length > 0) {
+            console.log(`[Event Store] Hydrating and replaying ${events.length} events since sequence ${startSeq}`);
+            this.events = events;
+            
+            const lastEvent = this.events[this.events.length - 1];
+            this.sequenceCounter = lastEvent.sequenceNumber + 1;
+            this.lastEventHash = lastEvent.deterministicHash;
+          } else if (startSeq > 0) {
+            // No new events since snapshot, set sequence counter based on snapshot
+            this.events = [];
+            this.sequenceCounter = startSeq;
+          }
+        }
+      }
+
+      // 3. Restore snapshot state
+      if (stateData && this.stateRestorer) {
+        this.stateRestorer(stateData);
+      }
+    } catch (err: any) {
+      console.error('[Event Store] Hydration failed:', err.message);
+    }
   }
 
   /**
@@ -93,10 +207,10 @@ export class DeterministicEventLog {
         filteredEvents = filteredEvents.filter(e => e.sequenceNumber <= filter.endSequence!);
       }
       if (filter.startTimestamp !== undefined) {
-        filteredEvents = filteredEvents.filter(e => e.timestamp >= filter.startTimestamp!);
+        filteredEvents = filteredEvents.filter(e => e.exchangeTimestamp >= filter.startTimestamp!);
       }
       if (filter.endTimestamp !== undefined) {
-        filteredEvents = filteredEvents.filter(e => e.timestamp <= filter.endTimestamp!);
+        filteredEvents = filteredEvents.filter(e => e.exchangeTimestamp <= filter.endTimestamp!);
       }
       if (filter.correlationId) {
         filteredEvents = filteredEvents.filter(e => e.correlationId === filter.correlationId);
@@ -173,23 +287,6 @@ export class DeterministicEventLog {
   }
 
   /**
-   * Manage memory bounds by archiving old events
-   */
-  private manageMemoryBounds(): void {
-    if (this.events.length > DeterministicEventLog.MAX_MEMORY_EVENTS) {
-      // In production, this would archive events to persistent storage
-      // For now, we just trim to keep memory bounded
-      const eventsToKeep = this.events.slice(-DeterministicEventLog.ARCHIVE_THRESHOLD);
-      this.events = eventsToKeep;
-      
-      // Update last event hash
-      if (this.events.length > 0) {
-        this.lastEventHash = this.events[this.events.length - 1].deterministicHash;
-      }
-    }
-  }
-
-  /**
    * Clear all events (for testing)
    */
   public clear(): void {
@@ -209,7 +306,6 @@ export class DeterministicEventLog {
    * Get memory usage estimate
    */
   public getMemoryUsage(): number {
-    // Rough estimate: average event size * number of events
     const avgEventSize = 1024; // 1KB average
     return this.events.length * avgEventSize;
   }

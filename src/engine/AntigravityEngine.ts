@@ -84,7 +84,7 @@ export class AntigravityEngine {
         type: 'CircuitBreakerHalt',
         correlationId: context.symbol,
         payload: { reason: health.reason, breakerType: health.breakerType },
-        marketSnapshot: context
+        marketContextSnapshot: context
       });
       return {
         context,
@@ -120,9 +120,9 @@ export class AntigravityEngine {
   ): void {
     const events = this.logger.getEvents({ startSequence: eventSequence });
     for (const event of events) {
-      if (event.marketSnapshot) {
+      if (event.marketContextSnapshot) {
         // MarketContext is a superset of RawMarketInput — safe to pass directly
-        const evaluation = this.evaluateMarket(event.marketSnapshot as RawMarketInput);
+        const evaluation = this.evaluateMarket(event.marketContextSnapshot as RawMarketInput);
         callback(evaluation, event);
       }
     }

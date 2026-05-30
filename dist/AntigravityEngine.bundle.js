@@ -89,12 +89,15 @@ var AntigravityCore = (() => {
   function createSystemEvent(base) {
     const sequenceNumber = base.sequenceNumber ?? 0;
     const hashInput = JSON.stringify({
-      timestamp: base.timestamp,
+      exchangeTimestamp: base.exchangeTimestamp,
+      receiveTimestamp: base.receiveTimestamp,
       sequenceNumber,
       eventId: base.eventId,
       correlationId: base.correlationId,
       type: base.type,
       payload: base.payload,
+      decisionMetadata: base.decisionMetadata,
+      eventVersion: base.eventVersion,
       previousEventHash: base.previousEventHash
     });
     return {
@@ -150,39 +153,131 @@ var AntigravityCore = (() => {
   };
 
   // src/engine/DeterministicEventLog.ts
-  var DeterministicEventLog = class _DeterministicEventLog {
+  var DeterministicEventLog = class {
     events = [];
     lastEventHash = "";
     sequenceCounter = 0;
     clock;
-    /** Maximum events in memory (archived events are persisted) */
-    static MAX_MEMORY_EVENTS = 1e4;
-    /** Archive threshold - when to start archiving old events */
-    static ARCHIVE_THRESHOLD = 5e3;
+    stateGetter;
+    stateRestorer;
     constructor(clock) {
       this.clock = clock;
+    }
+    registerStateGetter(getter) {
+      this.stateGetter = getter;
+    }
+    registerStateRestorer(restorer) {
+      this.stateRestorer = restorer;
     }
     /**
      * Append a new deterministic event to the log
      */
-    append(type, correlationId, payload, marketSnapshot) {
+    append(type, correlationId, payload, marketContextSnapshot) {
       const timestamp = this.clock.now();
-      const sequenceNumber = this.sequenceCounter++;
+      const sequenceNumber = this.sequenceCounter;
+      if (this.events.length > 0) {
+        const last = this.events[this.events.length - 1];
+        if (sequenceNumber !== last.sequenceNumber + 1) {
+          throw new Error(`State violation: Sequence jump detected. Expected: ${last.sequenceNumber + 1}, Got: ${sequenceNumber}`);
+        }
+      }
       const eventId = `${correlationId}-${sequenceNumber}`;
       const event = createSystemEvent({
-        timestamp,
+        exchangeTimestamp: timestamp,
+        receiveTimestamp: Date.now(),
         sequenceNumber,
         eventId,
         correlationId,
         type,
         payload,
-        marketSnapshot,
+        marketContextSnapshot,
+        eventVersion: 1,
         previousEventHash: this.lastEventHash
       });
       this.events.push(event);
+      this.sequenceCounter++;
       this.lastEventHash = event.deterministicHash;
-      this.manageMemoryBounds();
+      this.postEventToBackend(event);
+      if (sequenceNumber > 0 && sequenceNumber % 1e4 === 0) {
+        this.triggerSnapshotCheckpoint(sequenceNumber);
+      }
       return event;
+    }
+    postEventToBackend(event) {
+      if (typeof fetch === "undefined") return;
+      fetch("http://localhost:4000/api/advisor/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(event)
+      }).then((res) => {
+        if (!res.ok) {
+          console.warn(`[Event Store] Failed to sync event ${event.sequenceNumber}: ${res.status}`);
+        }
+      }).catch((err) => {
+        console.warn(`[Event Store] Backend unreachable for event ${event.sequenceNumber}:`, err.message);
+      });
+    }
+    triggerSnapshotCheckpoint(sequenceNumber) {
+      if (typeof fetch === "undefined" || !this.stateGetter) return;
+      try {
+        const stateData = this.stateGetter();
+        fetch("http://localhost:4000/api/advisor/snapshots", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sequenceNumber,
+            stateData,
+            timestamp: Date.now()
+          })
+        }).then((res) => {
+          if (res.ok) {
+            console.log(`[Event Store] Snapshot checkpoint created at sequence ${sequenceNumber}`);
+          }
+        }).catch(() => {
+        });
+      } catch (e) {
+        console.error("[Event Store] Checkpoint snapshot generation failed:", e);
+      }
+    }
+    /**
+     * Hydrates the Event Log from the SQLite backend store
+     */
+    async hydrate() {
+      if (typeof fetch === "undefined") return;
+      try {
+        const snapshotRes = await fetch("http://localhost:4000/api/advisor/snapshots/latest");
+        let startSeq = 0;
+        let stateData = null;
+        if (snapshotRes.ok) {
+          const snapshot = await snapshotRes.json();
+          if (snapshot && typeof snapshot.sequenceNumber === "number") {
+            startSeq = snapshot.sequenceNumber + 1;
+            stateData = snapshot.stateData;
+            console.log(`[Event Store] Hydrating from latest snapshot at sequence ${snapshot.sequenceNumber}`);
+          }
+        }
+        const eventsRes = await fetch(`http://localhost:4000/api/advisor/events?fromSequence=${startSeq}`);
+        if (eventsRes.ok) {
+          const events = await eventsRes.json();
+          if (Array.isArray(events)) {
+            if (events.length > 0) {
+              console.log(`[Event Store] Hydrating and replaying ${events.length} events since sequence ${startSeq}`);
+              this.events = events;
+              const lastEvent = this.events[this.events.length - 1];
+              this.sequenceCounter = lastEvent.sequenceNumber + 1;
+              this.lastEventHash = lastEvent.deterministicHash;
+            } else if (startSeq > 0) {
+              this.events = [];
+              this.sequenceCounter = startSeq;
+            }
+          }
+        }
+        if (stateData && this.stateRestorer) {
+          this.stateRestorer(stateData);
+        }
+      } catch (err) {
+        console.error("[Event Store] Hydration failed:", err.message);
+      }
     }
     /**
      * Get events with deterministic filtering
@@ -197,10 +292,10 @@ var AntigravityCore = (() => {
           filteredEvents = filteredEvents.filter((e) => e.sequenceNumber <= filter.endSequence);
         }
         if (filter.startTimestamp !== void 0) {
-          filteredEvents = filteredEvents.filter((e) => e.timestamp >= filter.startTimestamp);
+          filteredEvents = filteredEvents.filter((e) => e.exchangeTimestamp >= filter.startTimestamp);
         }
         if (filter.endTimestamp !== void 0) {
-          filteredEvents = filteredEvents.filter((e) => e.timestamp <= filter.endTimestamp);
+          filteredEvents = filteredEvents.filter((e) => e.exchangeTimestamp <= filter.endTimestamp);
         }
         if (filter.correlationId) {
           filteredEvents = filteredEvents.filter((e) => e.correlationId === filter.correlationId);
@@ -259,18 +354,6 @@ var AntigravityCore = (() => {
       return true;
     }
     /**
-     * Manage memory bounds by archiving old events
-     */
-    manageMemoryBounds() {
-      if (this.events.length > _DeterministicEventLog.MAX_MEMORY_EVENTS) {
-        const eventsToKeep = this.events.slice(-_DeterministicEventLog.ARCHIVE_THRESHOLD);
-        this.events = eventsToKeep;
-        if (this.events.length > 0) {
-          this.lastEventHash = this.events[this.events.length - 1].deterministicHash;
-        }
-      }
-    }
-    /**
      * Clear all events (for testing)
      */
     clear() {
@@ -315,8 +398,17 @@ var AntigravityCore = (() => {
         event.type,
         event.correlationId,
         event.payload,
-        event.marketSnapshot
+        event.marketContextSnapshot
       );
+    }
+    async hydrate() {
+      await this.eventLog.hydrate();
+    }
+    registerStateGetter(getter) {
+      this.eventLog.registerStateGetter(getter);
+    }
+    registerStateRestorer(restorer) {
+      this.eventLog.registerStateRestorer(restorer);
     }
     getEvents(filter) {
       return this.eventLog.getEvents({
@@ -482,7 +574,7 @@ var AntigravityCore = (() => {
             type: "ConstraintRejected",
             correlationId: context.symbol,
             payload: { constraintId: constraint.id, reason: result.reason },
-            marketSnapshot: context
+            marketContextSnapshot: context
           });
           const totalEvaluationTime2 = Date.now() - startTime;
           return {
@@ -501,7 +593,7 @@ var AntigravityCore = (() => {
           type: "ConstraintPassed",
           correlationId: context.symbol,
           payload: { constraintId: constraint.id },
-          marketSnapshot: context
+          marketContextSnapshot: context
         });
       }
       const totalEvaluationTime = Date.now() - startTime;
@@ -769,7 +861,7 @@ var AntigravityCore = (() => {
         tradeEligible: rejections.length === 0 && currentState === "EXECUTION_WINDOW" /* EXECUTION_WINDOW */,
         activeBlockers: Array.from(activeBlockers),
         recentTransitions: stateTransitions.map((e) => ({
-          time: new Date(e.timestamp).toISOString(),
+          time: new Date(e.receiveTimestamp).toISOString(),
           from: e.payload.from,
           to: e.payload.to,
           reason: e.payload.reason
@@ -946,7 +1038,7 @@ var AntigravityCore = (() => {
           type: "CircuitBreakerHalt",
           correlationId: context.symbol,
           payload: { reason: health.reason, breakerType: health.breakerType },
-          marketSnapshot: context
+          marketContextSnapshot: context
         });
         return {
           context,
@@ -974,8 +1066,8 @@ var AntigravityCore = (() => {
     replayEvaluation(_initialContext, eventSequence, callback) {
       const events = this.logger.getEvents({ startSequence: eventSequence });
       for (const event of events) {
-        if (event.marketSnapshot) {
-          const evaluation = this.evaluateMarket(event.marketSnapshot);
+        if (event.marketContextSnapshot) {
+          const evaluation = this.evaluateMarket(event.marketContextSnapshot);
           callback(evaluation, event);
         }
       }

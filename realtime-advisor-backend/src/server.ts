@@ -3,16 +3,185 @@ import cors from '@fastify/cors';
 import { db } from './db/index.js';
 import { advisorSignals } from './db/schema.js';
 import { eq, desc, lt, and, or, sql } from 'drizzle-orm';
+import { DatabaseSync } from 'node:sqlite';
 
 const fastify = Fastify({ logger: true });
 
 fastify.register(cors, { origin: '*' });
+
+// --- Authoritative SQLite Event Log Setup ---
+const dbSync = new DatabaseSync('events.db');
+dbSync.exec("PRAGMA journal_mode = WAL;");
+dbSync.exec(`
+  CREATE TABLE IF NOT EXISTS events (
+    sequence_number INTEGER PRIMARY KEY,
+    exchange_timestamp INTEGER NOT NULL,
+    receive_timestamp INTEGER NOT NULL,
+    event_id TEXT NOT NULL,
+    correlation_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    market_context_snapshot TEXT,
+    decision_metadata TEXT,
+    event_version INTEGER NOT NULL,
+    previous_event_hash TEXT,
+    deterministic_hash TEXT NOT NULL
+  );
+`);
+dbSync.exec(`
+  CREATE TABLE IF NOT EXISTS snapshots (
+    sequence_number INTEGER PRIMARY KEY,
+    state_data TEXT NOT NULL,
+    timestamp INTEGER NOT NULL
+  );
+`);
 
 fastify.get('/health', async () => ({
   service: 'realtime-advisor-backend',
   status: 'OK',
   timestamp: new Date().toISOString()
 }));
+
+// --- SQLite Event Sourcing Endpoints ---
+
+fastify.get('/api/advisor/events', async (req: any, reply) => {
+  try {
+    const fromSequence = Number(req.query.fromSequence || 0);
+    const getEventsStmt = dbSync.prepare(
+      "SELECT * FROM events WHERE sequence_number >= ? ORDER BY sequence_number ASC"
+    );
+    const events = getEventsStmt.all(fromSequence) as any[];
+
+    const parsedEvents = events.map((e: any) => ({
+      sequenceNumber: e.sequence_number,
+      exchangeTimestamp: e.exchange_timestamp,
+      receiveTimestamp: e.receive_timestamp,
+      eventId: e.event_id,
+      correlationId: e.correlation_id,
+      type: e.type,
+      payload: JSON.parse(e.payload),
+      marketContextSnapshot: e.market_context_snapshot ? JSON.parse(e.market_context_snapshot) : undefined,
+      decisionMetadata: e.decision_metadata ? JSON.parse(e.decision_metadata) : undefined,
+      eventVersion: e.event_version,
+      previousEventHash: e.previous_event_hash || undefined,
+      deterministicHash: e.deterministic_hash
+    }));
+
+    return parsedEvents;
+  } catch (err) {
+    fastify.log.error(err);
+    reply.status(500).send({ error: 'Failed to retrieve event logs' });
+  }
+});
+
+fastify.post('/api/advisor/events', async (req: any, reply) => {
+  try {
+    const event = req.body;
+    if (!event || typeof event.sequenceNumber !== 'number') {
+      return reply.status(400).send({ error: 'Invalid event format' });
+    }
+
+    // Sequence checking gate
+    const maxSeqStmt = dbSync.prepare("SELECT MAX(sequence_number) as maxSeq FROM events");
+    const result = maxSeqStmt.get() as any;
+    const maxSeq = result?.maxSeq !== null ? result.maxSeq : -1;
+
+    const expectedSeq = maxSeq + 1;
+    if (event.sequenceNumber !== expectedSeq) {
+      return reply.status(409).send({
+        error: `Sequence mismatch. Expected: ${expectedSeq}, Received: ${event.sequenceNumber}`
+      });
+    }
+
+    // Cryptographic hash continuity check
+    if (maxSeq >= 0) {
+      const lastEventStmt = dbSync.prepare("SELECT deterministic_hash FROM events WHERE sequence_number = ?");
+      const lastEvent = lastEventStmt.get(maxSeq) as any;
+      const lastHash = lastEvent?.deterministic_hash || '';
+
+      if (event.previousEventHash !== lastHash) {
+        return reply.status(409).send({
+          error: `Hash link broken. Expected previous hash: ${lastHash}, Received: ${event.previousEventHash}`
+        });
+      }
+    }
+
+    // Insert
+    const insertEventStmt = dbSync.prepare(`
+      INSERT INTO events (
+        sequence_number, exchange_timestamp, receive_timestamp, event_id, correlation_id,
+        type, payload, market_context_snapshot, decision_metadata, event_version,
+        previous_event_hash, deterministic_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insertEventStmt.run(
+      event.sequenceNumber,
+      event.exchangeTimestamp,
+      event.receiveTimestamp,
+      event.eventId,
+      event.correlationId,
+      event.type,
+      JSON.stringify(event.payload),
+      event.marketContextSnapshot ? JSON.stringify(event.marketContextSnapshot) : null,
+      event.decisionMetadata ? JSON.stringify(event.decisionMetadata) : null,
+      event.eventVersion,
+      event.previousEventHash || null,
+      event.deterministicHash
+    );
+
+    return { success: true, sequenceNumber: event.sequenceNumber };
+  } catch (err) {
+    fastify.log.error(err);
+    reply.status(500).send({ error: 'Failed to append event to SQLite store' });
+  }
+});
+
+fastify.post('/api/advisor/snapshots', async (req: any, reply) => {
+  try {
+    const { sequenceNumber, stateData, timestamp } = req.body;
+    if (typeof sequenceNumber !== 'number' || !stateData) {
+      return reply.status(400).send({ error: 'Invalid snapshot format' });
+    }
+
+    const insertSnapshotStmt = dbSync.prepare(`
+      INSERT OR REPLACE INTO snapshots (sequence_number, state_data, timestamp)
+      VALUES (?, ?, ?)
+    `);
+    insertSnapshotStmt.run(
+      sequenceNumber,
+      JSON.stringify(stateData),
+      timestamp || Date.now()
+    );
+
+    return { success: true, sequenceNumber };
+  } catch (err) {
+    fastify.log.error(err);
+    reply.status(500).send({ error: 'Failed to store snapshot checkpoint' });
+  }
+});
+
+fastify.get('/api/advisor/snapshots/latest', async (_req, reply) => {
+  try {
+    const latestSnapshotStmt = dbSync.prepare(
+      "SELECT * FROM snapshots ORDER BY sequence_number DESC LIMIT 1"
+    );
+    const snapshot = latestSnapshotStmt.get() as any;
+
+    if (!snapshot) {
+      return null;
+    }
+
+    return {
+      sequenceNumber: snapshot.sequence_number,
+      stateData: JSON.parse(snapshot.state_data),
+      timestamp: snapshot.timestamp
+    };
+  } catch (err) {
+    fastify.log.error(err);
+    reply.status(500).send({ error: 'Failed to retrieve latest snapshot' });
+  }
+});
 
 fastify.get('/api/advisor/signals', async (_req, reply) => {
   try {

@@ -27,7 +27,7 @@ export class ExplainabilityAPI {
       tradeEligible: rejections.length === 0 && currentState === MarketState.EXECUTION_WINDOW,
       activeBlockers: Array.from(activeBlockers),
       recentTransitions: stateTransitions.map(e => ({
-        time: new Date(e.timestamp).toISOString(),
+        time: new Date(e.receiveTimestamp).toISOString(),
         from: e.payload.from,
         to: e.payload.to,
         reason: e.payload.reason

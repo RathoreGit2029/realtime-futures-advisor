@@ -156,13 +156,16 @@ export interface Constraint {
  * Immutable system event with deterministic ordering.
  */
 export interface SystemEvent {
-  readonly timestamp: number;
+  readonly exchangeTimestamp: number;
+  readonly receiveTimestamp: number;
   readonly sequenceNumber: number;
   readonly eventId: string;
   readonly correlationId: string;
   readonly type: string;
   readonly payload: any;
-  readonly marketSnapshot?: MarketContext;
+  readonly marketContextSnapshot?: MarketContext;
+  readonly decisionMetadata?: Record<string, any>;
+  readonly eventVersion: number;
   readonly deterministicHash: string;
   readonly previousEventHash?: string;
 }
@@ -180,12 +183,15 @@ export function createSystemEvent(
   const sequenceNumber = base.sequenceNumber ?? 0;
 
   const hashInput = JSON.stringify({
-    timestamp: base.timestamp,
+    exchangeTimestamp: base.exchangeTimestamp,
+    receiveTimestamp: base.receiveTimestamp,
     sequenceNumber,
     eventId: base.eventId,
     correlationId: base.correlationId,
     type: base.type,
     payload: base.payload,
+    decisionMetadata: base.decisionMetadata,
+    eventVersion: base.eventVersion,
     previousEventHash: base.previousEventHash
   });
 
