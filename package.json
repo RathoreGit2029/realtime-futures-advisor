@@ -1,10 +1,12 @@
 {
   "name": "realtime-futures-advisor",
-  "version": "1.0.0",
-  "description": "",
+  "version": "1.1.0",
+  "description": "Binance Futures Real-Time Advisor Chrome extension",
   "main": "background.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "node build.js",
+    "build:engine": "node build.js",
+    "test": "jest"
   },
   "keywords": [],
   "author": "",
@@ -13,6 +15,7 @@
   "devDependencies": {
     "@types/chrome": "^0.1.42",
     "@types/jest": "^30.0.0",
+    "@types/node": "^25.9.1",
     "esbuild": "^0.28.0",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.11",

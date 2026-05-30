@@ -1,0 +1,27 @@
+{
+  "name": "realtime-advisor-backend",
+  "version": "1.0.0",
+  "description": "API and Postgres ledger for the Binance Futures Real-Time Advisor Chrome extension",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.30.10",
+    "fastify": "^4.26.2",
+    "pg": "^8.11.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "@types/pg": "^8.11.5",
+    "drizzle-kit": "^0.21.4",
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
+  }
+}

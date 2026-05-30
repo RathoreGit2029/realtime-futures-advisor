@@ -5,7 +5,12 @@ export class RegimeConstraint implements Constraint {
   
   private allowedRegimes: MarketRegime[];
 
-  constructor(allowedRegimes: MarketRegime[] = [MarketRegime.TRENDING, MarketRegime.COMPRESSION, MarketRegime.MEAN_REVERTING]) {
+  constructor(allowedRegimes: MarketRegime[] = [
+    MarketRegime.TRENDING,
+    MarketRegime.COMPRESSION,
+    MarketRegime.MEAN_REVERTING,
+    MarketRegime.CHOPPY
+  ]) {
     this.allowedRegimes = allowedRegimes;
   }
 
@@ -20,14 +25,9 @@ export class RegimeConstraint implements Constraint {
       };
     }
 
-    // Dynamic confidence based on regime compatibility
-    let impact = 0;
-    if (ctx.regime === MarketRegime.TRENDING) impact = 15;
-    if (ctx.regime === MarketRegime.MEAN_REVERTING) impact = 5;
-
     return {
       passed: true,
-      confidenceImpact: impact,
+      confidenceImpact: 0,
       reason: `Regime ${ctx.regime} aligns with execution strategy.`
     };
   }

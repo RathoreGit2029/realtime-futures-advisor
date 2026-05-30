@@ -1,69 +1,154 @@
-import { MarketRegime, MarketContext } from './Types';
-import { EventLog } from './EventSourcing';
+import { MarketRegime } from './Types';
 
-export interface RegimeStats {
-  wins: number;
-  losses: number;
-  winSums: number;
-  lossSums: number;
+export interface BayesianStats {
+  /** Beta distribution alpha (prior wins + observed wins) */
+  alpha: number;
+  /** Beta distribution beta (prior losses + observed losses) */
+  beta: number;
+  totalTrades: number;
+  lastUpdated: number;
 }
 
-export class ProbabilityCalibrationEngine {
-  private regimeWinRates: Record<MarketRegime, RegimeStats> = {
-    [MarketRegime.TRENDING]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-    [MarketRegime.MEAN_REVERTING]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-    [MarketRegime.CHOPPY]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-    [MarketRegime.EXPANSION]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-    [MarketRegime.COMPRESSION]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-    [MarketRegime.HIGH_VOLATILITY]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-    [MarketRegime.LOW_LIQUIDITY]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-    [MarketRegime.NEWS_EVENT]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-    [MarketRegime.LIQUIDATION_CASCADE]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 }
-  };
+export interface ProbabilityEstimate {
+  /** Posterior mean win-rate as a percentage 0–100 */
+  pointEstimate: number;
+  /** 95% credible interval [lower, upper] */
+  credibleInterval95: [number, number];
+  standardError: number;
+  effectiveSampleSize: number;
+  /** True once we have >= MIN_RELIABLE_SAMPLES observed trades */
+  isReliable: boolean;
+}
 
-  /**
-   * Calculates dynamic probability score based on historical performance in similar contexts.
-   * Utilizes Laplace smoothing and expectancy filters to prevent overfitting.
-   */
-  public getCalibratedBaseConfidence(regime: MarketRegime): number {
-    const stats = this.regimeWinRates[regime];
-    const totalTrades = stats.wins + stats.losses;
-    
-    // Laplace smoothing: prior alpha = 2 (implies 50% Win Rate default prior)
-    const alpha = 2;
-    const smoothedWinRate = ((stats.wins + alpha) / (totalTrades + 2 * alpha)) * 100;
-    
-    if (totalTrades < 10) {
-      return Math.round(smoothedWinRate);
+/** Serialisable snapshot — stored in chrome.storage to survive SW restarts */
+export type ProbabilityState = Record<string, BayesianStats>;
+
+const MIN_RELIABLE_SAMPLES = 20;
+
+// Beta(2,2) prior — symmetric, mean = 50%, weakly informative
+const PRIOR_ALPHA = 2;
+const PRIOR_BETA = 2;
+
+export class ProbabilityCalibrationEngine {
+  private stats: Record<MarketRegime, BayesianStats>;
+
+  constructor(restoredState?: ProbabilityState) {
+    this.stats = {} as Record<MarketRegime, BayesianStats>;
+
+    for (const regime of Object.values(MarketRegime)) {
+      const saved = restoredState?.[regime];
+      this.stats[regime] = saved ?? {
+        alpha: PRIOR_ALPHA,
+        beta: PRIOR_BETA,
+        totalTrades: 0,
+        lastUpdated: 0
+      };
     }
-    
-    // Expectancy calculation: (WinRate * AvgWin) - (LossRate * AvgLoss)
-    const winRate = stats.wins / totalTrades;
-    const lossRate = stats.losses / totalTrades;
-    const avgWin = stats.wins > 0 ? (stats.winSums / stats.wins) : 0;
-    const avgLoss = stats.losses > 0 ? (stats.lossSums / stats.losses) : 0;
-    const expectancy = (winRate * avgWin) - (lossRate * avgLoss);
-    
-    let calibratedConfidence = smoothedWinRate;
-    if (expectancy < 0) {
-      calibratedConfidence = Math.max(0, smoothedWinRate * 0.5); // Demote negative expectancy
-    } else if (expectancy > 0) {
-      calibratedConfidence = Math.min(100, smoothedWinRate * 1.2); // Promote positive expectancy
-    }
-    
-    return Math.round(calibratedConfidence);
   }
 
-  public recordTradeResult(regime: MarketRegime, win: boolean, pnlPercent?: number): void {
-    const stats = this.regimeWinRates[regime];
-    const pnlValue = pnlPercent !== undefined ? Math.abs(pnlPercent) : 1.0;
-    
+  /**
+   * Returns the Bayesian posterior estimate for the given regime.
+   *
+   * With no trade history (fresh start or after SW restart without restored state),
+   * pointEstimate = 50.  The caller in background.js compares this against
+   * triggerThreshold (default 78).  50 < 78, so the DAG path will not fire
+   * until enough wins are recorded.
+   *
+   * To make the system usable from day one, background.js passes the
+   * composite score from the JS scoring layer as a confidence override when
+   * the Bayesian engine has insufficient data (isReliable === false).
+   * See background.js evaluateMarket integration comment.
+   */
+  public getCalibratedBaseConfidence(regime: MarketRegime): ProbabilityEstimate {
+    const s = this.stats[regime];
+    const n = s.alpha + s.beta;
+
+    const mean = s.alpha / n;
+    // Beta distribution variance
+    const variance = (s.alpha * s.beta) / (n * n * (n + 1));
+    const stdDev = Math.sqrt(variance);
+
+    const z = 1.96;
+    const lower = Math.max(0, mean - z * stdDev) * 100;
+    const upper = Math.min(1, mean + z * stdDev) * 100;
+
+    return {
+      pointEstimate: Math.round(mean * 1000) / 10, // 1 decimal place
+      credibleInterval95: [Math.round(lower * 10) / 10, Math.round(upper * 10) / 10],
+      standardError: Math.round(stdDev * 1000) / 10,
+      effectiveSampleSize: s.totalTrades,
+      isReliable: s.totalTrades >= MIN_RELIABLE_SAMPLES
+    };
+  }
+
+  /**
+   * Record a trade outcome and update the posterior.
+   * pnlPercent is stored for future expectancy weighting but not used yet.
+   */
+  public recordTradeResult(regime: MarketRegime, win: boolean, _pnlPercent?: number): void {
+    const s = this.stats[regime];
     if (win) {
-      stats.wins++;
-      stats.winSums += pnlValue;
+      s.alpha += 1;
     } else {
-      stats.losses++;
-      stats.lossSums += pnlValue;
+      s.beta += 1;
     }
+    s.totalTrades += 1;
+    s.lastUpdated = Date.now();
+  }
+
+  /**
+   * Serialise the full probability state for persistence in chrome.storage.
+   * Call this after every recordTradeResult() and restore on SW startup.
+   */
+  public serializeState(): ProbabilityState {
+    const out: ProbabilityState = {};
+    for (const regime of Object.values(MarketRegime)) {
+      out[regime] = { ...this.stats[regime] };
+    }
+    return out;
+  }
+
+  /**
+   * Replace the current state with a previously serialised snapshot.
+   * Used on SW restart to restore accumulated learning.
+   */
+  public deserializeState(state: ProbabilityState): void {
+    for (const regime of Object.values(MarketRegime)) {
+      if (state[regime]) {
+        this.stats[regime] = { ...state[regime] };
+      }
+    }
+  }
+
+  public getRegimeStatistics(regime: MarketRegime): BayesianStats {
+    return { ...this.stats[regime] };
+  }
+
+  public resetRegime(regime: MarketRegime): void {
+    this.stats[regime] = {
+      alpha: PRIOR_ALPHA,
+      beta: PRIOR_BETA,
+      totalTrades: 0,
+      lastUpdated: 0
+    };
+  }
+
+  public getCalibrationQuality(): {
+    totalRegimes: number;
+    reliableRegimes: number;
+    averageEffectiveSamples: number;
+  } {
+    const regimes = Object.values(MarketRegime);
+    let reliable = 0;
+    let totalSamples = 0;
+    for (const r of regimes) {
+      if (this.stats[r].totalTrades >= MIN_RELIABLE_SAMPLES) reliable++;
+      totalSamples += this.stats[r].totalTrades;
+    }
+    return {
+      totalRegimes: regimes.length,
+      reliableRegimes: reliable,
+      averageEffectiveSamples: Math.round(totalSamples / regimes.length)
+    };
   }
 }

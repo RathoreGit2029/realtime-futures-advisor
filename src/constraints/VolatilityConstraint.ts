@@ -25,7 +25,7 @@ export class VolatilityConstraint implements Constraint {
 
     return {
       passed: true,
-      confidenceImpact: volatility.isCompressing ? 10 : 0, // Compression gives higher probability of incoming expansion
+      confidenceImpact: 0,
       reason: 'Volatility conditions are within safe execution parameters.'
     };
   }

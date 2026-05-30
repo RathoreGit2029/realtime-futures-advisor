@@ -16,7 +16,7 @@ export class HTFAlignmentConstraint implements Constraint {
 
     return {
       passed: true,
-      confidenceImpact: trendState.strength > 60 ? 20 : 10,
+      confidenceImpact: 0,
       reason: 'HTF Alignment confirmed.'
     };
   }

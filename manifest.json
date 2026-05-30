@@ -27,7 +27,7 @@
         "https://*.binance.com/zh-CN/futures/*",
         "https://*.binance.com/futures/*"
       ],
-      "js": ["dist/AntigravityEngine.bundle.js", "content.js"],
+      "js": ["content.js"],
       "css": ["hud.css"],
       "run_at": "document_idle"
     }

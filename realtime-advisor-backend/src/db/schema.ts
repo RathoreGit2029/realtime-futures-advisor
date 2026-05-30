@@ -1,0 +1,36 @@
+import { pgTable, uuid, varchar, integer, decimal, timestamp, boolean } from 'drizzle-orm/pg-core';
+
+/** Signals persisted from the Binance Futures Real-Time Advisor Chrome extension. */
+export const advisorSignals = pgTable('advisor_signals', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  symbol: varchar('symbol', { length: 15 }).notNull(),
+  direction: varchar('direction', { length: 5 }).notNull(),
+  entryPrice: decimal('entry_price', { precision: 18, scale: 8 }).notNull(),
+  stopLoss: decimal('stop_loss', { precision: 18, scale: 8 }).notNull(),
+  target1: decimal('target_1', { precision: 18, scale: 8 }).notNull(),
+  target2: decimal('target_2', { precision: 18, scale: 8 }).notNull(),
+  positionSize: decimal('position_size', { precision: 18, scale: 8 }).notNull(),
+  marginRequired: decimal('margin_required', { precision: 18, scale: 8 }).notNull(),
+  leverage: integer('leverage').notNull(),
+  riskAmount: decimal('risk_amount', { precision: 18, scale: 8 }).notNull(),
+  probability: integer('probability').notNull(),
+  patternName: varchar('pattern_name', { length: 50 }).notNull(),
+  rsiValue: integer('rsi_value'),
+  ema9: decimal('ema_9', { precision: 18, scale: 8 }),
+  ema21: decimal('ema_21', { precision: 18, scale: 8 }),
+  bullishObCount: integer('bullish_ob_count'),
+  bearishObCount: integer('bearish_ob_count'),
+  confidenceTrend: integer('confidence_trend'),
+  confidenceSmc: integer('confidence_smc'),
+  confidenceMomentum: integer('confidence_momentum'),
+  status: varchar('status', { length: 15 }).default('ACTIVE'),
+  pnlPercentage: decimal('pnl_percentage', { precision: 10, scale: 4 }).default('0.0000'),
+  elapsedCandles: integer('elapsed_candles').default(0),
+  timeframe: varchar('timeframe', { length: 5 }).notNull(),
+  actionTaken: boolean('action_taken').default(false),
+  hypotheticalOutcome: varchar('hypothetical_outcome', { length: 15 }).default('ACTIVE'),
+  actualOutcome: varchar('actual_outcome', { length: 15 }),
+  triggerCatalyst: varchar('trigger_catalyst', { length: 2000 }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true })
+});

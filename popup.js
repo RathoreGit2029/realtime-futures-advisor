@@ -900,27 +900,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Clear journal ──
   clearBtn.addEventListener('click', () => {
     if (!confirm('Reset all trade history metrics?')) return;
-    const cleared = { wins: 0, losses: 0, timeouts: 0 };
-    const now = Date.now();
-    chrome.storage.local.set({ 
-      journalStats: cleared, 
-      sandboxJournalStats: cleared,
-      activeTrades: {},
-      journalLastClearedTime: now,
-      consecutiveLosses: 0
-    }, () => {
-      renderStats(cleared);
-      renderActiveTrade(null);
-      statusMsg.textContent = '🗑️ Trade Journal Reset!';
-      setTimeout(() => { statusMsg.textContent = ''; }, 2000);
-
-      syncJournalWithDatabase();
-
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]?.id) {
-          chrome.tabs.sendMessage(tabs[0].id, { type: 'CLEAR_JOURNAL' }).catch(() => {});
-        }
-      });
+    chrome.runtime.sendMessage({ type: 'CLEAR_JOURNAL' }, (response) => {
+      if (response && response.success) {
+        statusMsg.textContent = '🗑️ Trade Journal Reset!';
+        setTimeout(() => { statusMsg.textContent = ''; }, 2000);
+        syncJournalWithDatabase();
+      }
     });
   });
 

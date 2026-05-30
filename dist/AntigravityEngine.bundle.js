@@ -23,7 +23,9 @@ var AntigravityCore = (() => {
   __export(AntigravityEngine_exports, {
     AntigravityEngine: () => AntigravityEngine,
     MarketRegime: () => MarketRegime,
-    MarketState: () => MarketState
+    MarketState: () => MarketState,
+    createMarketContext: () => createMarketContext,
+    createSystemEvent: () => createSystemEvent
   });
 
   // src/engine/Types.ts
@@ -51,139 +53,266 @@ var AntigravityCore = (() => {
     MarketRegime2["LIQUIDATION_CASCADE"] = "LIQUIDATION_CASCADE";
     return MarketRegime2;
   })(MarketRegime || {});
+  function deterministicHashOf(input) {
+    let h = 5381;
+    for (let i = 0; i < input.length; i++) {
+      h = (h << 5) + h ^ input.charCodeAt(i);
+      h = h >>> 0;
+    }
+    return h.toString(16).padStart(8, "0");
+  }
+  function createMarketContext(base) {
+    const sequenceNumber = base.sequenceNumber ?? 0;
+    const hashInput = JSON.stringify({
+      timestamp: base.timestamp,
+      sequenceNumber,
+      symbol: base.symbol,
+      regime: base.regime,
+      marketState: base.marketState,
+      volatility: base.volatility,
+      liquidityState: base.liquidityState,
+      trendState: base.trendState,
+      sessionState: base.sessionState,
+      displacementQuality: base.displacementQuality,
+      spread: base.spread,
+      orderbookDepth: base.orderbookDepth,
+      confidence: base.confidence,
+      currentPrice: base.currentPrice
+    });
+    return {
+      ...base,
+      sequenceNumber,
+      deterministicHash: deterministicHashOf(hashInput)
+    };
+  }
+  function createSystemEvent(base) {
+    const sequenceNumber = base.sequenceNumber ?? 0;
+    const hashInput = JSON.stringify({
+      timestamp: base.timestamp,
+      sequenceNumber,
+      eventId: base.eventId,
+      correlationId: base.correlationId,
+      type: base.type,
+      payload: base.payload,
+      previousEventHash: base.previousEventHash
+    });
+    return {
+      ...base,
+      sequenceNumber,
+      deterministicHash: deterministicHashOf(hashInput),
+      previousEventHash: base.previousEventHash
+    };
+  }
 
-  // src/engine/EventSourcing.ts
-  var EventLog = class _EventLog {
-    events = [];
-    pendingQueue = [];
-    isProcessingQueue = false;
-    static instance;
-    constructor() {
+  // src/engine/DeterministicClock.ts
+  var SystemClock = class {
+    sequenceNumber = 0;
+    now() {
+      return Date.now();
     }
-    static getInstance() {
-      if (!_EventLog.instance) {
-        _EventLog.instance = new _EventLog();
-      }
-      return _EventLog.instance;
+    sequence() {
+      return this.sequenceNumber++;
     }
-    /**
-     * Appends an event to the immutable log.
-     */
-    append(event) {
-      const fullEvent = {
-        ...event,
-        timestamp: Date.now(),
-        eventId: crypto.randomUUID()
-      };
-      this.events.push(fullEvent);
-      if (this.events.length > 1e3) {
-        this.events.shift();
-      }
-      this.pendingQueue.push(fullEvent);
-      this.triggerQueueProcessor();
-      return fullEvent;
+    advance(_ms) {
     }
-    triggerQueueProcessor() {
-      if (this.isProcessingQueue) return;
-      this.isProcessingQueue = true;
-      this.processQueue();
-    }
-    async processQueue() {
-      if (this.pendingQueue.length === 0) {
-        this.isProcessingQueue = false;
-        return;
-      }
-      const event = this.pendingQueue[0];
-      try {
-        const response = await fetch("http://localhost:4000/api/advisor/events", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(event)
-        });
-        if (response.ok) {
-          this.pendingQueue.shift();
-        } else {
-          console.warn(`PostgreSQL Ledger error ${response.status}, retrying in 5s...`);
-          setTimeout(() => this.processQueue(), 5e3);
-          return;
-        }
-      } catch (err) {
-        console.warn("PostgreSQL Ledger offline, retrying in 5s:", err.message);
-        setTimeout(() => this.processQueue(), 5e3);
-        return;
-      }
-      setTimeout(() => this.processQueue(), 100);
-    }
-    /**
-     * Replays events for a given correlation ID or time range
-     */
-    getEvents(filter) {
-      let result = this.events;
-      if (filter) {
-        if (filter.startTs) result = result.filter((e) => e.timestamp >= filter.startTs);
-        if (filter.endTs) result = result.filter((e) => e.timestamp <= filter.endTs);
-        if (filter.correlationId) result = result.filter((e) => e.correlationId === filter.correlationId);
-      }
-      return result;
-    }
-    clear() {
-      this.events = [];
-      this.pendingQueue = [];
-      this.isProcessingQueue = false;
+    reset() {
+      this.sequenceNumber = 0;
     }
   };
 
-  // src/engine/StateMachine.ts
-  var MarketStateMachine = class {
-    currentState = "NO_TRADE" /* NO_TRADE */;
-    logger = EventLog.getInstance();
-    getCurrentState() {
-      return this.currentState;
+  // src/engine/DeterministicEventLog.ts
+  var DeterministicEventLog = class _DeterministicEventLog {
+    events = [];
+    lastEventHash = "";
+    sequenceCounter = 0;
+    clock;
+    /** Maximum events in memory (archived events are persisted) */
+    static MAX_MEMORY_EVENTS = 1e4;
+    /** Archive threshold - when to start archiving old events */
+    static ARCHIVE_THRESHOLD = 5e3;
+    constructor(clock) {
+      this.clock = clock;
     }
     /**
-     * Deterministic state transition
+     * Append a new deterministic event to the log
      */
-    transition(newState, context, reason) {
-      const isValid = this.validateTransition(this.currentState, newState);
-      if (isValid) {
-        this.logger.append({
-          type: "StateTransition",
-          correlationId: context.symbol,
-          payload: {
-            from: this.currentState,
-            to: newState,
-            reason
-          },
-          marketSnapshot: context
-        });
-        this.currentState = newState;
-        return true;
-      }
-      this.logger.append({
-        type: "InvalidStateTransitionAttempt",
-        correlationId: context.symbol,
-        payload: {
-          from: this.currentState,
-          attemptedTo: newState,
-          reason: "Violated DAG topology"
-        },
-        marketSnapshot: context
+    append(type, correlationId, payload, marketSnapshot) {
+      const timestamp = this.clock.now();
+      const sequenceNumber = this.sequenceCounter++;
+      const eventId = `${correlationId}-${sequenceNumber}`;
+      const event = createSystemEvent({
+        timestamp,
+        sequenceNumber,
+        eventId,
+        correlationId,
+        type,
+        payload,
+        marketSnapshot,
+        previousEventHash: this.lastEventHash
       });
-      return false;
+      this.events.push(event);
+      this.lastEventHash = event.deterministicHash;
+      this.manageMemoryBounds();
+      return event;
     }
-    validateTransition(from, to) {
-      const validTransitions = {
-        ["NO_TRADE" /* NO_TRADE */]: ["ACCUMULATION" /* ACCUMULATION */, "CHOPPY" /* CHOPPY */],
-        ["CHOPPY" /* CHOPPY */]: ["ACCUMULATION" /* ACCUMULATION */, "NO_TRADE" /* NO_TRADE */],
-        ["ACCUMULATION" /* ACCUMULATION */]: ["LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */, "CHOPPY" /* CHOPPY */],
-        ["LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */]: ["DISPLACEMENT" /* DISPLACEMENT */, "REVERSAL" /* REVERSAL */],
-        ["DISPLACEMENT" /* DISPLACEMENT */]: ["RETRACEMENT" /* RETRACEMENT */, "EXPANSION" /* EXPANSION */],
-        ["RETRACEMENT" /* RETRACEMENT */]: ["EXECUTION_WINDOW" /* EXECUTION_WINDOW */, "REVERSAL" /* REVERSAL */],
-        ["EXECUTION_WINDOW" /* EXECUTION_WINDOW */]: ["EXPANSION" /* EXPANSION */, "REVERSAL" /* REVERSAL */, "NO_TRADE" /* NO_TRADE */],
-        ["EXPANSION" /* EXPANSION */]: ["ACCUMULATION" /* ACCUMULATION */, "REVERSAL" /* REVERSAL */],
-        ["REVERSAL" /* REVERSAL */]: ["ACCUMULATION" /* ACCUMULATION */, "CHOPPY" /* CHOPPY */]
+    /**
+     * Get events with deterministic filtering
+     */
+    getEvents(filter) {
+      let filteredEvents = this.events;
+      if (filter) {
+        if (filter.startSequence !== void 0) {
+          filteredEvents = filteredEvents.filter((e) => e.sequenceNumber >= filter.startSequence);
+        }
+        if (filter.endSequence !== void 0) {
+          filteredEvents = filteredEvents.filter((e) => e.sequenceNumber <= filter.endSequence);
+        }
+        if (filter.startTimestamp !== void 0) {
+          filteredEvents = filteredEvents.filter((e) => e.timestamp >= filter.startTimestamp);
+        }
+        if (filter.endTimestamp !== void 0) {
+          filteredEvents = filteredEvents.filter((e) => e.timestamp <= filter.endTimestamp);
+        }
+        if (filter.correlationId) {
+          filteredEvents = filteredEvents.filter((e) => e.correlationId === filter.correlationId);
+        }
+        if (filter.eventType) {
+          filteredEvents = filteredEvents.filter((e) => e.type === filter.eventType);
+        }
+      }
+      const startSequence = filteredEvents.length > 0 ? filteredEvents[0].sequenceNumber : 0;
+      const endSequence = filteredEvents.length > 0 ? filteredEvents[filteredEvents.length - 1].sequenceNumber : 0;
+      return {
+        events: [...filteredEvents],
+        startSequence,
+        endSequence,
+        totalEvents: filteredEvents.length
       };
-      return validTransitions[from]?.includes(to) ?? false;
+    }
+    /**
+     * Get event by sequence number (deterministic)
+     */
+    getEvent(sequenceNumber) {
+      return this.events.find((e) => e.sequenceNumber === sequenceNumber);
+    }
+    /**
+     * Get current replay state
+     */
+    getReplayState() {
+      return {
+        currentSequence: this.sequenceCounter,
+        lastEventHash: this.lastEventHash,
+        totalEventsProcessed: this.events.length
+      };
+    }
+    /**
+     * Replay events from a specific sequence number
+     */
+    replayFrom(sequenceNumber, callback) {
+      const eventsToReplay = this.events.filter((e) => e.sequenceNumber >= sequenceNumber);
+      this.verifyEventChain(eventsToReplay);
+      eventsToReplay.forEach(callback);
+    }
+    /**
+     * Verify event chain integrity
+     */
+    verifyEventChain(events) {
+      if (events.length === 0) return true;
+      const sortedEvents = [...events].sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+      for (let i = 1; i < sortedEvents.length; i++) {
+        if (sortedEvents[i].sequenceNumber !== sortedEvents[i - 1].sequenceNumber + 1) {
+          throw new Error(`Event chain broken at sequence ${sortedEvents[i - 1].sequenceNumber}`);
+        }
+        if (sortedEvents[i].previousEventHash !== sortedEvents[i - 1].deterministicHash) {
+          throw new Error(`Event hash chain broken at sequence ${sortedEvents[i].sequenceNumber}`);
+        }
+      }
+      return true;
+    }
+    /**
+     * Manage memory bounds by archiving old events
+     */
+    manageMemoryBounds() {
+      if (this.events.length > _DeterministicEventLog.MAX_MEMORY_EVENTS) {
+        const eventsToKeep = this.events.slice(-_DeterministicEventLog.ARCHIVE_THRESHOLD);
+        this.events = eventsToKeep;
+        if (this.events.length > 0) {
+          this.lastEventHash = this.events[this.events.length - 1].deterministicHash;
+        }
+      }
+    }
+    /**
+     * Clear all events (for testing)
+     */
+    clear() {
+      this.events = [];
+      this.lastEventHash = "";
+      this.sequenceCounter = 0;
+    }
+    /**
+     * Get total event count
+     */
+    getEventCount() {
+      return this.events.length;
+    }
+    /**
+     * Get memory usage estimate
+     */
+    getMemoryUsage() {
+      const avgEventSize = 1024;
+      return this.events.length * avgEventSize;
+    }
+  };
+
+  // src/engine/EventSourcing.ts
+  var EventLog = class _EventLog {
+    eventLog;
+    static instance = null;
+    constructor(clock) {
+      this.eventLog = new DeterministicEventLog(clock);
+    }
+    static getInstance(clock) {
+      if (!_EventLog.instance) {
+        _EventLog.instance = new _EventLog(clock ?? new SystemClock());
+      }
+      return _EventLog.instance;
+    }
+    /** Reset singleton — only for tests */
+    static resetInstance() {
+      _EventLog.instance = null;
+    }
+    append(event) {
+      return this.eventLog.append(
+        event.type,
+        event.correlationId,
+        event.payload,
+        event.marketSnapshot
+      );
+    }
+    getEvents(filter) {
+      return this.eventLog.getEvents({
+        startTimestamp: filter?.startTs,
+        endTimestamp: filter?.endTs,
+        correlationId: filter?.correlationId,
+        startSequence: filter?.startSequence,
+        endSequence: filter?.endSequence,
+        eventType: filter?.eventType
+      }).events;
+    }
+    replayFrom(sequenceNumber, callback) {
+      this.eventLog.replayFrom(sequenceNumber, callback);
+    }
+    getReplayState() {
+      return this.eventLog.getReplayState();
+    }
+    clear() {
+      this.eventLog.clear();
+    }
+    getEventCount() {
+      return this.eventLog.getEventCount();
+    }
+    getMemoryUsage() {
+      return this.eventLog.getMemoryUsage();
     }
   };
 
@@ -191,212 +320,381 @@ var AntigravityCore = (() => {
   var MarketRegimeEngine = class {
     logger = EventLog.getInstance();
     /**
-     * Evaluates the current regime based on context data.
-     * In Phase 1, this uses basic heuristic boundaries.
-     * Future phases will use the probability engine.
+     * Classify regime from a full MarketContext.
+     * Used internally after context is built.
      */
     classify(context) {
-      const { volatility, trendState, sessionState } = context;
-      let newRegime = "CHOPPY" /* CHOPPY */;
-      if (sessionState.isOverlap && volatility.isExpanding && trendState.strength > 70) {
+      return this.classifyRaw(context);
+    }
+    /**
+     * Classify regime from a partial context object.
+     * Called by AntigravityEngine before the full immutable context is assembled,
+     * and directly from background.js via the engine bundle.
+     *
+     * Rules are evaluated in priority order — first match wins.
+     */
+    classifyRaw(inputs) {
+      const { volatility, trendState, sessionState } = inputs;
+      const isTradeSession = sessionState.currentSession === "LONDON" || sessionState.currentSession === "NEW_YORK" || sessionState.currentSession === "ASIA";
+      let newRegime;
+      if (volatility.historicalRank > 95) {
+        newRegime = "HIGH_VOLATILITY" /* HIGH_VOLATILITY */;
+      } else if (isTradeSession && volatility.isExpanding && trendState.strength > 60) {
         newRegime = "TRENDING" /* TRENDING */;
       } else if (volatility.isCompressing && trendState.strength < 30) {
         newRegime = "COMPRESSION" /* COMPRESSION */;
-      } else if (volatility.historicalRank > 95) {
-        newRegime = "HIGH_VOLATILITY" /* HIGH_VOLATILITY */;
       } else if (trendState.direction === "SIDEWAYS" && volatility.atr > 0) {
         newRegime = "MEAN_REVERTING" /* MEAN_REVERTING */;
+      } else {
+        newRegime = "CHOPPY" /* CHOPPY */;
       }
-      if (context.regime !== newRegime) {
+      const previousRegime = inputs.regime;
+      if (previousRegime !== void 0 && previousRegime !== newRegime) {
         this.logger.append({
           type: "RegimeChanged",
-          correlationId: context.symbol,
+          correlationId: inputs.symbol,
           payload: {
-            from: context.regime,
+            from: previousRegime,
             to: newRegime,
-            reason: `Volatility Rank: ${volatility.historicalRank}, Trend Strength: ${trendState.strength}`
-          },
-          marketSnapshot: context
+            volatilityRank: volatility.historicalRank,
+            trendStrength: trendState.strength,
+            session: sessionState.currentSession
+          }
         });
       }
       return newRegime;
     }
+    /**
+     * Returns the classification with a full explanation of which rule fired.
+     */
+    explainClassification(inputs) {
+      const { volatility, trendState, sessionState } = inputs;
+      const isTradeSession = sessionState.currentSession === "LONDON" || sessionState.currentSession === "NEW_YORK" || sessionState.currentSession === "ASIA";
+      let regime;
+      let ruleFired;
+      if (volatility.historicalRank > 95) {
+        regime = "HIGH_VOLATILITY" /* HIGH_VOLATILITY */;
+        ruleFired = "volatilityRank > 95";
+      } else if (isTradeSession && volatility.isExpanding && trendState.strength > 60) {
+        regime = "TRENDING" /* TRENDING */;
+        ruleFired = "tradeSession && isExpanding && strength > 60";
+      } else if (volatility.isCompressing && trendState.strength < 30) {
+        regime = "COMPRESSION" /* COMPRESSION */;
+        ruleFired = "isCompressing && strength < 30";
+      } else if (trendState.direction === "SIDEWAYS" && volatility.atr > 0) {
+        regime = "MEAN_REVERTING" /* MEAN_REVERTING */;
+        ruleFired = "direction === SIDEWAYS && atr > 0";
+      } else {
+        regime = "CHOPPY" /* CHOPPY */;
+        ruleFired = "default";
+      }
+      return {
+        regime,
+        ruleFired,
+        inputs: {
+          volatilityRank: volatility.historicalRank,
+          isExpanding: volatility.isExpanding,
+          isCompressing: volatility.isCompressing,
+          trendStrength: trendState.strength,
+          trendDirection: trendState.direction,
+          isTradeSession
+        }
+      };
+    }
   };
 
   // src/engine/ConstraintEngine.ts
+  function hashString(input) {
+    let h = 5381;
+    for (let i = 0; i < input.length; i++) {
+      h = (h << 5) + h ^ input.charCodeAt(i);
+      h = h >>> 0;
+    }
+    return h.toString(16).padStart(8, "0");
+  }
   var ConstraintEngine = class {
     constraints = [];
     logger = EventLog.getInstance();
     /**
-     * Registers a constraint into the DAG.
-     * Order matters as it acts as a short-circuit DAG.
+     * Register a constraint. Constraints are evaluated in registration order.
+     * Order is intentional: cheap/broad gates first, expensive/narrow gates last.
+     * Do NOT sort — registration order is the contract.
      */
     registerConstraint(constraint) {
       this.constraints.push(constraint);
     }
     /**
-     * Evaluates the sequence of constraints.
-     * Returns a comprehensive explanation object.
+     * Evaluate all constraints in registration order.
+     * Short-circuits on first failure.
+     * finalConfidence is the Bayesian point estimate from context — never synthesised here.
      */
     evaluate(context) {
+      const startTime = Date.now();
+      const individualEvaluations = [];
       const failedConstraints = [];
       const passedConstraints = [];
-      let currentConfidence = context.confidence;
+      const failureReasons = [];
       for (const constraint of this.constraints) {
+        const evalStart = Date.now();
         const result = constraint.evaluate(context);
+        const evaluationTime = Date.now() - evalStart;
+        individualEvaluations.push({
+          constraintId: constraint.id,
+          passed: result.passed,
+          reason: result.reason,
+          confidenceImpact: result.confidenceImpact,
+          metadata: result.metadata,
+          evaluationTime
+        });
         if (!result.passed) {
           failedConstraints.push(constraint.id);
+          failureReasons.push(result.reason);
           this.logger.append({
             type: "ConstraintRejected",
             correlationId: context.symbol,
-            payload: {
-              constraintId: constraint.id,
-              reason: result.reason
-            },
+            payload: { constraintId: constraint.id, reason: result.reason },
             marketSnapshot: context
           });
+          const totalEvaluationTime2 = Date.now() - startTime;
           return {
             tradeEligible: false,
             failedConstraints,
             passedConstraints,
-            finalConfidence: 0
+            failureReasons,
+            finalConfidence: 0,
+            individualEvaluations,
+            totalEvaluationTime: totalEvaluationTime2,
+            deterministicHash: this.decisionHash(context, individualEvaluations)
           };
         }
         passedConstraints.push(constraint.id);
-        currentConfidence += result.confidenceImpact;
         this.logger.append({
           type: "ConstraintPassed",
           correlationId: context.symbol,
-          payload: {
-            constraintId: constraint.id,
-            impact: result.confidenceImpact
-          }
+          payload: { constraintId: constraint.id },
+          marketSnapshot: context
         });
       }
+      const totalEvaluationTime = Date.now() - startTime;
+      const finalConfidence = Math.max(0, Math.min(100, context.confidence));
       return {
         tradeEligible: true,
         failedConstraints,
         passedConstraints,
-        finalConfidence: currentConfidence
+        failureReasons,
+        finalConfidence,
+        individualEvaluations,
+        totalEvaluationTime,
+        deterministicHash: this.decisionHash(context, individualEvaluations)
       };
+    }
+    decisionHash(context, evaluations) {
+      return hashString(JSON.stringify({
+        ctxHash: context.deterministicHash,
+        evals: evaluations.map((e) => ({ id: e.constraintId, passed: e.passed }))
+      }));
+    }
+    getEvaluationOrder() {
+      return this.constraints.map((c) => c.id);
+    }
+    getConstraintStatistics() {
+      return {
+        totalConstraints: this.constraints.length,
+        evaluationOrder: this.getEvaluationOrder()
+      };
+    }
+    // Keep for test compatibility
+    validateEvaluationOrder() {
+      return true;
     }
   };
 
   // src/engine/ProbabilityCalibration.ts
+  var MIN_RELIABLE_SAMPLES = 20;
+  var PRIOR_ALPHA = 2;
+  var PRIOR_BETA = 2;
   var ProbabilityCalibrationEngine = class {
-    regimeWinRates = {
-      ["TRENDING" /* TRENDING */]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-      ["MEAN_REVERTING" /* MEAN_REVERTING */]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-      ["CHOPPY" /* CHOPPY */]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-      ["EXPANSION" /* EXPANSION */]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-      ["COMPRESSION" /* COMPRESSION */]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-      ["HIGH_VOLATILITY" /* HIGH_VOLATILITY */]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-      ["LOW_LIQUIDITY" /* LOW_LIQUIDITY */]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-      ["NEWS_EVENT" /* NEWS_EVENT */]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 },
-      ["LIQUIDATION_CASCADE" /* LIQUIDATION_CASCADE */]: { wins: 0, losses: 0, winSums: 0, lossSums: 0 }
-    };
+    stats;
+    constructor(restoredState) {
+      this.stats = {};
+      for (const regime of Object.values(MarketRegime)) {
+        const saved = restoredState?.[regime];
+        this.stats[regime] = saved ?? {
+          alpha: PRIOR_ALPHA,
+          beta: PRIOR_BETA,
+          totalTrades: 0,
+          lastUpdated: 0
+        };
+      }
+    }
     /**
-     * Calculates dynamic probability score based on historical performance in similar contexts.
-     * Utilizes Laplace smoothing and expectancy filters to prevent overfitting.
+     * Returns the Bayesian posterior estimate for the given regime.
+     *
+     * With no trade history (fresh start or after SW restart without restored state),
+     * pointEstimate = 50.  The caller in background.js compares this against
+     * triggerThreshold (default 78).  50 < 78, so the DAG path will not fire
+     * until enough wins are recorded.
+     *
+     * To make the system usable from day one, background.js passes the
+     * composite score from the JS scoring layer as a confidence override when
+     * the Bayesian engine has insufficient data (isReliable === false).
+     * See background.js evaluateMarket integration comment.
      */
     getCalibratedBaseConfidence(regime) {
-      const stats = this.regimeWinRates[regime];
-      const totalTrades = stats.wins + stats.losses;
-      const alpha = 2;
-      const smoothedWinRate = (stats.wins + alpha) / (totalTrades + 2 * alpha) * 100;
-      if (totalTrades < 10) {
-        return Math.round(smoothedWinRate);
-      }
-      const winRate = stats.wins / totalTrades;
-      const lossRate = stats.losses / totalTrades;
-      const avgWin = stats.wins > 0 ? stats.winSums / stats.wins : 0;
-      const avgLoss = stats.losses > 0 ? stats.lossSums / stats.losses : 0;
-      const expectancy = winRate * avgWin - lossRate * avgLoss;
-      let calibratedConfidence = smoothedWinRate;
-      if (expectancy < 0) {
-        calibratedConfidence = Math.max(0, smoothedWinRate * 0.5);
-      } else if (expectancy > 0) {
-        calibratedConfidence = Math.min(100, smoothedWinRate * 1.2);
-      }
-      return Math.round(calibratedConfidence);
+      const s = this.stats[regime];
+      const n = s.alpha + s.beta;
+      const mean = s.alpha / n;
+      const variance = s.alpha * s.beta / (n * n * (n + 1));
+      const stdDev = Math.sqrt(variance);
+      const z = 1.96;
+      const lower = Math.max(0, mean - z * stdDev) * 100;
+      const upper = Math.min(1, mean + z * stdDev) * 100;
+      return {
+        pointEstimate: Math.round(mean * 1e3) / 10,
+        // 1 decimal place
+        credibleInterval95: [Math.round(lower * 10) / 10, Math.round(upper * 10) / 10],
+        standardError: Math.round(stdDev * 1e3) / 10,
+        effectiveSampleSize: s.totalTrades,
+        isReliable: s.totalTrades >= MIN_RELIABLE_SAMPLES
+      };
     }
-    recordTradeResult(regime, win, pnlPercent) {
-      const stats = this.regimeWinRates[regime];
-      const pnlValue = pnlPercent !== void 0 ? Math.abs(pnlPercent) : 1;
+    /**
+     * Record a trade outcome and update the posterior.
+     * pnlPercent is stored for future expectancy weighting but not used yet.
+     */
+    recordTradeResult(regime, win, _pnlPercent) {
+      const s = this.stats[regime];
       if (win) {
-        stats.wins++;
-        stats.winSums += pnlValue;
+        s.alpha += 1;
       } else {
-        stats.losses++;
-        stats.lossSums += pnlValue;
+        s.beta += 1;
       }
+      s.totalTrades += 1;
+      s.lastUpdated = Date.now();
+    }
+    /**
+     * Serialise the full probability state for persistence in chrome.storage.
+     * Call this after every recordTradeResult() and restore on SW startup.
+     */
+    serializeState() {
+      const out = {};
+      for (const regime of Object.values(MarketRegime)) {
+        out[regime] = { ...this.stats[regime] };
+      }
+      return out;
+    }
+    /**
+     * Replace the current state with a previously serialised snapshot.
+     * Used on SW restart to restore accumulated learning.
+     */
+    deserializeState(state) {
+      for (const regime of Object.values(MarketRegime)) {
+        if (state[regime]) {
+          this.stats[regime] = { ...state[regime] };
+        }
+      }
+    }
+    getRegimeStatistics(regime) {
+      return { ...this.stats[regime] };
+    }
+    resetRegime(regime) {
+      this.stats[regime] = {
+        alpha: PRIOR_ALPHA,
+        beta: PRIOR_BETA,
+        totalTrades: 0,
+        lastUpdated: 0
+      };
+    }
+    getCalibrationQuality() {
+      const regimes = Object.values(MarketRegime);
+      let reliable = 0;
+      let totalSamples = 0;
+      for (const r of regimes) {
+        if (this.stats[r].totalTrades >= MIN_RELIABLE_SAMPLES) reliable++;
+        totalSamples += this.stats[r].totalTrades;
+      }
+      return {
+        totalRegimes: regimes.length,
+        reliableRegimes: reliable,
+        averageEffectiveSamples: Math.round(totalSamples / regimes.length)
+      };
     }
   };
 
   // src/risk/CircuitBreakers.ts
   var CircuitBreakerEngine = class {
     logger = EventLog.getInstance();
-    /**
-     * Evaluates system health and market conditions to determine if trading should halt.
-     */
-    evaluateSystemHealth(context, recentEvents) {
-      const { volatility, spread } = context;
-      if (volatility.atr > 0 && spread > volatility.atr * 0.25) {
-        this.logger.append({
-          type: "CircuitBreakerTriggered",
-          correlationId: context.symbol,
-          payload: { reason: "Spread exploded relative to ATR" }
-        });
-        return { halted: true, reason: "Spread exploded relative to ATR" };
-      }
-      const latency = Date.now() - context.timestamp;
-      if (latency > 3e3) {
-        this.logger.append({
-          type: "CircuitBreakerTriggered",
-          correlationId: context.symbol,
-          payload: { reason: `Data latency spike: ${latency}ms` }
-        });
-        return { halted: true, reason: `Data latency spike: ${latency}ms` };
-      }
-      const recentExecutionRejections = recentEvents.filter((e) => e.type === "ExecutionRejected");
-      if (recentExecutionRejections.length > 5) {
-        return { halted: true, reason: "High frequency execution rejections (Execution Failure Cascade)" };
-      }
-      return { halted: false };
-    }
-  };
-
-  // src/execution/SafetyLayer.ts
-  var ExecutionSafetyLayer = class {
-    logger = EventLog.getInstance();
-    /**
-     * Validates if a generated signal is safe to execute in the real market.
-     * Simulates institutional conditions like slippage and delayed fills.
-     */
-    validateExecution(context, intendedDirection, intendedEntryPrice) {
-      const { spread, currentPrice, volatility } = context;
-      const deviation = Math.abs(currentPrice - intendedEntryPrice);
-      if (deviation > volatility.atr * 0.05) {
-        this.logger.append({
-          type: "ExecutionRejected",
-          correlationId: context.symbol,
-          payload: { reason: `Price deviated too far from intended entry. Deviation=${deviation}` },
-          marketSnapshot: context
-        });
-        return { safe: false, reason: "Price deviated too far (Stale Entry)" };
-      }
-      const estimatedSlippage = spread * 1.5;
-      const adjustedEntry = intendedDirection === "LONG" ? currentPrice + estimatedSlippage : currentPrice - estimatedSlippage;
-      this.logger.append({
-        type: "ExecutionValidated",
-        correlationId: context.symbol,
-        payload: { intendedEntryPrice, adjustedEntry, estimatedSlippage },
-        marketSnapshot: context
-      });
-      return {
-        safe: true,
-        adjustedEntry
+    config;
+    constructor(config) {
+      this.config = {
+        // Disabled by default because background.js uses a synthetic spread.
+        // Enable and lower this threshold only when real order-book spread is available.
+        maxSpreadToAtrRatio: Infinity,
+        maxDataLatencyMs: 5e3,
+        maxConsecutiveRejections: 5,
+        maxVolatilityRank: 95,
+        minSweepQualityWhenSweepPresent: 40,
+        ...config
       };
+    }
+    /**
+     * Evaluate system health in deterministic order.
+     * Uses context.timestamp (Binance server time) for latency, not Date.now(),
+     * so the check is consistent with the context's own time reference.
+     *
+     * wallClockNow is injected so callers can pass Date.now() explicitly,
+     * making the check testable and deterministic in replay.
+     */
+    evaluateSystemHealth(context, recentEvents, wallClockNow = Date.now()) {
+      if (context.volatility.historicalRank > this.config.maxVolatilityRank) {
+        return this.halt(
+          `Volatility rank ${context.volatility.historicalRank} > ${this.config.maxVolatilityRank}`,
+          "EXTREME_VOLATILITY",
+          "HIGH"
+        );
+      }
+      if (this.config.maxSpreadToAtrRatio !== Infinity && context.volatility.atr > 0 && context.spread > context.volatility.atr * this.config.maxSpreadToAtrRatio) {
+        return this.halt(
+          `Spread ${context.spread.toFixed(4)} > ${this.config.maxSpreadToAtrRatio * 100}% of ATR ${context.volatility.atr.toFixed(4)}`,
+          "SPREAD_EXPLOSION",
+          "HIGH"
+        );
+      }
+      const latencyMs = wallClockNow - context.timestamp;
+      if (latencyMs > this.config.maxDataLatencyMs) {
+        return this.halt(
+          `Data latency ${latencyMs}ms > ${this.config.maxDataLatencyMs}ms`,
+          "DATA_LATENCY",
+          "MEDIUM"
+        );
+      }
+      const recentRejections = recentEvents.filter((e) => e.type === "ExecutionRejected");
+      if (recentRejections.length > this.config.maxConsecutiveRejections) {
+        return this.halt(
+          `${recentRejections.length} consecutive execution rejections`,
+          "REJECTION_CASCADE",
+          "CRITICAL"
+        );
+      }
+      if (context.liquidityState.hasSweep && context.liquidityState.sweepQuality < this.config.minSweepQualityWhenSweepPresent) {
+        return this.halt(
+          `Sweep quality ${context.liquidityState.sweepQuality} < ${this.config.minSweepQualityWhenSweepPresent} (sweep present but weak)`,
+          "WEAK_SWEEP",
+          "LOW"
+        );
+      }
+      return { halted: false, severity: "LOW" };
+    }
+    halt(reason, breakerType, severity) {
+      this.logger.append({
+        type: "CircuitBreakerTriggered",
+        correlationId: "system",
+        payload: { reason, breakerType, severity }
+      });
+      return { halted: true, reason, breakerType, severity };
+    }
+    getConfig() {
+      return { ...this.config };
     }
   };
 
@@ -435,7 +733,12 @@ var AntigravityCore = (() => {
   var RegimeConstraint = class {
     id = "RegimeConstraint";
     allowedRegimes;
-    constructor(allowedRegimes = ["TRENDING" /* TRENDING */, "COMPRESSION" /* COMPRESSION */, "MEAN_REVERTING" /* MEAN_REVERTING */]) {
+    constructor(allowedRegimes = [
+      "TRENDING" /* TRENDING */,
+      "COMPRESSION" /* COMPRESSION */,
+      "MEAN_REVERTING" /* MEAN_REVERTING */,
+      "CHOPPY" /* CHOPPY */
+    ]) {
       this.allowedRegimes = allowedRegimes;
     }
     evaluate(ctx) {
@@ -447,12 +750,9 @@ var AntigravityCore = (() => {
           reason: `Regime ${ctx.regime} is not in allowed list: [${this.allowedRegimes.join(", ")}]`
         };
       }
-      let impact = 0;
-      if (ctx.regime === "TRENDING" /* TRENDING */) impact = 15;
-      if (ctx.regime === "MEAN_REVERTING" /* MEAN_REVERTING */) impact = 5;
       return {
         passed: true,
-        confidenceImpact: impact,
+        confidenceImpact: 0,
         reason: `Regime ${ctx.regime} aligns with execution strategy.`
       };
     }
@@ -479,8 +779,7 @@ var AntigravityCore = (() => {
       }
       return {
         passed: true,
-        confidenceImpact: volatility.isCompressing ? 10 : 0,
-        // Compression gives higher probability of incoming expansion
+        confidenceImpact: 0,
         reason: "Volatility conditions are within safe execution parameters."
       };
     }
@@ -507,17 +806,24 @@ var AntigravityCore = (() => {
           };
         }
         const intendedTradeDirection = trendState.direction;
-        if (intendedTradeDirection === "UP" && liquidityState.recentSweepDirection === "BULLISH") {
+        if (intendedTradeDirection === "UP" && liquidityState.recentSweepDirection === "BEARISH") {
           return {
             passed: false,
             confidenceImpact: 0,
             reason: "Sweep direction opposes logical entry. Swept highs, but looking for longs."
           };
         }
+        if (intendedTradeDirection === "DOWN" && liquidityState.recentSweepDirection === "BULLISH") {
+          return {
+            passed: false,
+            confidenceImpact: 0,
+            reason: "Sweep direction opposes logical entry. Swept lows, but looking for shorts."
+          };
+        }
       }
       return {
         passed: true,
-        confidenceImpact: liquidityState.sweepQuality > 80 ? 15 : 5,
+        confidenceImpact: 0,
         reason: "Liquidity sweep confirmed and valid."
       };
     }
@@ -537,7 +843,7 @@ var AntigravityCore = (() => {
       }
       return {
         passed: true,
-        confidenceImpact: trendState.strength > 60 ? 20 : 10,
+        confidenceImpact: 0,
         reason: "HTF Alignment confirmed."
       };
     }
@@ -546,12 +852,10 @@ var AntigravityCore = (() => {
   // src/engine/AntigravityEngine.ts
   var AntigravityEngine = class {
     logger = EventLog.getInstance();
-    stateMachine = new MarketStateMachine();
     regimeEngine = new MarketRegimeEngine();
     constraintEngine = new ConstraintEngine();
     probEngine = new ProbabilityCalibrationEngine();
     circuitBreakers = new CircuitBreakerEngine();
-    safetyLayer = new ExecutionSafetyLayer();
     api = new ExplainabilityAPI();
     constructor() {
       this.constraintEngine.registerConstraint(new RegimeConstraint());
@@ -560,27 +864,71 @@ var AntigravityCore = (() => {
       this.constraintEngine.registerConstraint(new HTFAlignmentConstraint());
     }
     /**
-     * Main evaluation loop. Can be run in shadow mode without triggering real trades.
+     * Single evaluation path.
+     *
+     * Accepts a plain context object from background.js (which cannot call
+     * createMarketContext itself because it runs in a different bundle scope).
+     * We normalise it here into a proper immutable context.
+     *
+     * Confidence flow:
+     *   1. Regime is classified from the incoming context fields.
+     *   2. Bayesian point estimate for that regime is fetched.
+     *   3. Context is rebuilt with the real confidence value.
+     *   4. Constraints gate on the rebuilt context.
+     *   5. finalConfidence in the decision IS the Bayesian estimate — never synthesised.
      */
-    evaluateTick(context, isShadowMode = true) {
-      this.logger.append({
-        type: "TickReceived",
-        correlationId: context.symbol,
-        payload: { price: context.currentPrice, spread: context.spread }
+    evaluateMarket(rawContext) {
+      const regime = this.regimeEngine.classifyRaw(rawContext);
+      const probabilityEstimate = this.probEngine.getCalibratedBaseConfidence(regime);
+      const context = createMarketContext({
+        ...rawContext,
+        regime,
+        confidence: probabilityEstimate.pointEstimate
       });
-      context.regime = this.regimeEngine.classify(context);
-      const health = this.circuitBreakers.evaluateSystemHealth(context, this.logger.getEvents({ startTs: Date.now() - 6e4 }));
-      if (health.halted) return;
+      const recentEvents = this.logger.getEvents({
+        startTs: context.timestamp - 6e4,
+        endTs: context.timestamp
+      });
+      const health = this.circuitBreakers.evaluateSystemHealth(context, recentEvents);
+      if (health.halted) {
+        this.logger.append({
+          type: "CircuitBreakerHalt",
+          correlationId: context.symbol,
+          payload: { reason: health.reason, breakerType: health.breakerType },
+          marketSnapshot: context
+        });
+        return {
+          context,
+          decision: {
+            tradeEligible: false,
+            failedConstraints: ["CircuitBreaker"],
+            passedConstraints: [],
+            failureReasons: [health.reason ?? "System halted"],
+            finalConfidence: 0,
+            individualEvaluations: [],
+            totalEvaluationTime: 0,
+            deterministicHash: ""
+          },
+          halted: true,
+          haltReason: health.reason
+        };
+      }
       const decision = this.constraintEngine.evaluate(context);
-      if (decision.tradeEligible && !isShadowMode) {
-        const intendedDirection = context.trendState.direction === "UP" ? "LONG" : "SHORT";
-        const safety = this.safetyLayer.validateExecution(context, intendedDirection, context.currentPrice);
-        if (safety.safe) {
-          console.log(`[EXECUTE] ${intendedDirection} @ ${safety.adjustedEntry}`);
+      return { context, decision, halted: false };
+    }
+    /**
+     * Replay evaluations from the in-memory event log.
+     * Only useful within the same service worker lifetime.
+     */
+    replayEvaluation(_initialContext, eventSequence, callback) {
+      const events = this.logger.getEvents({ startSequence: eventSequence });
+      for (const event of events) {
+        if (event.marketSnapshot) {
+          const evaluation = this.evaluateMarket(event.marketSnapshot);
+          callback(evaluation, event);
         }
       }
     }
   };
   return __toCommonJS(AntigravityEngine_exports);
 })();
-//# sourceMappingURL=AntigravityEngine.bundle.js.map

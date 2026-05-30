@@ -671,38 +671,15 @@ document.addEventListener('DOMContentLoaded', () => {
   btnReset.addEventListener('click', () => {
     if (!confirm('🚨 Are you sure you want to reset all trade history metrics? This will clear the Postgres ledger local stats and reset consecutive loss streaks.')) return;
     
-    const cleared = { wins: 0, losses: 0, timeouts: 0 };
-    const now = Date.now();
-    
-    chrome.storage.local.get(null, (items) => {
-      const keysToRemove = [];
-      for (const key in items) {
-        if (key.startsWith('activeTrade_') || key.startsWith('tabState_')) {
-          keysToRemove.push(key);
-        }
-      }
-      chrome.storage.local.remove(keysToRemove);
-      chrome.storage.local.set({ 
-        journalStats: cleared, 
-        journalLastClearedTime: now,
-        consecutiveLosses: 0
-      }, () => {
+    chrome.runtime.sendMessage({ type: 'CLEAR_JOURNAL' }, (response) => {
+      if (response && response.success) {
         activeTrades = {};
         tabStates = {};
         renderStats();
         renderActiveTrades();
         renderScanners();
         loadDatabaseHistory();
-        
-        // Notify all tabs to clear journal state
-        chrome.tabs.query({}, (tabs) => {
-          tabs.forEach(tab => {
-            if (tab.url && tab.url.includes('binance.com')) {
-              chrome.tabs.sendMessage(tab.id, { type: 'CLEAR_JOURNAL' }).catch(() => {});
-            }
-          });
-        });
-      });
+      }
     });
   });
 
@@ -1154,31 +1131,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Force close active position (with partitioned storage)
+  // Force close active position centrally via background SW
   function closePosition(sym) {
-    const key = 'activeTrade_' + sym;
-    chrome.storage.local.get(key, (res) => {
-      const trade = res[key];
-      
-      if (trade) {
-        // Find if there is an active tab matching the symbol to trigger early exit logic
-        // But even if not, we can flag it resolved as INVALIDATED directly in the database
-        // and delete from storage cache.
-        if (trade.dbId) {
-          const isSandbox = trade.status && trade.status.startsWith('SANDBOX_');
-          const payload = {
-            status: isSandbox ? 'SANDBOX_INVALIDATED' : 'INVALIDATED',
-            pnlPercentage: 0,
-            elapsedCandles: trade.elapsedCandles || 0
-          };
-          fetch(`http://localhost:4000/api/advisor/signals/${trade.dbId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          }).catch(() => {});
-        }
-
-        chrome.storage.local.remove(key);
+    chrome.runtime.sendMessage({ type: 'MANUAL_CLOSE_TRADE', symbol: sym }, (response) => {
+      if (response && response.success) {
+        console.log(`✅ Successfully closed active position for ${sym}`);
+      } else {
+        console.error(`❌ Failed to manually close trade:`, response ? response.error : 'Unknown error');
       }
     });
   }

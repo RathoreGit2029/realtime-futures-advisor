@@ -47,25 +47,102 @@ export interface SessionState {
   minutesIntoSession: number;
 }
 
+/**
+ * Fully assembled, immutable market context.
+ * Created by the engine after regime classification and confidence assignment.
+ * Never constructed directly by background.js — use RawMarketInput instead.
+ */
 export interface MarketContext {
+  readonly timestamp: number;
+  readonly sequenceNumber: number;
+  readonly symbol: string;
+  readonly regime: MarketRegime;
+  readonly marketState: MarketState;
+  readonly volatility: VolatilityState;
+  readonly liquidityState: LiquidityState;
+  readonly trendState: TrendState;
+  readonly sessionState: SessionState;
+  readonly displacementQuality: number;
+  readonly spread: number;
+  readonly orderbookDepth?: number;
+  readonly confidence: number;
+  readonly currentPrice: number;
+  readonly deterministicHash: string;
+}
+
+/**
+ * Raw input from background.js.
+ * regime is optional — the engine classifies it from the other fields.
+ * confidence is a placeholder — the engine overwrites it with the Bayesian posterior.
+ */
+export interface RawMarketInput {
   timestamp: number;
   symbol: string;
-  regime: MarketRegime;
   marketState: MarketState;
   volatility: VolatilityState;
   liquidityState: LiquidityState;
   trendState: TrendState;
   sessionState: SessionState;
-  displacementQuality: number; // 0-100
+  displacementQuality: number;
   spread: number;
   orderbookDepth?: number;
-  confidence: number; // probability calibration, not synthetic score
+  confidence: number;
   currentPrice: number;
+  sequenceNumber?: number;
+  /** Previous regime — used only for change-detection logging */
+  regime?: MarketRegime;
+}
+
+/**
+ * Browser-safe deterministic hash (djb2 variant).
+ * Works in Chrome service workers, Node.js, and test environments.
+ * Not cryptographic — used only for equality checking and replay verification.
+ */
+function deterministicHashOf(input: string): string {
+  let h = 5381;
+  for (let i = 0; i < input.length; i++) {
+    h = ((h << 5) + h) ^ input.charCodeAt(i);
+    h = h >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+/**
+ * Assemble a full immutable MarketContext from a complete set of fields.
+ * Called internally by the engine after regime and confidence are resolved.
+ */
+export function createMarketContext(
+  base: Omit<MarketContext, 'deterministicHash' | 'sequenceNumber'> & { sequenceNumber?: number }
+): MarketContext {
+  const sequenceNumber = base.sequenceNumber ?? 0;
+
+  const hashInput = JSON.stringify({
+    timestamp: base.timestamp,
+    sequenceNumber,
+    symbol: base.symbol,
+    regime: base.regime,
+    marketState: base.marketState,
+    volatility: base.volatility,
+    liquidityState: base.liquidityState,
+    trendState: base.trendState,
+    sessionState: base.sessionState,
+    displacementQuality: base.displacementQuality,
+    spread: base.spread,
+    orderbookDepth: base.orderbookDepth,
+    confidence: base.confidence,
+    currentPrice: base.currentPrice
+  });
+
+  return {
+    ...base,
+    sequenceNumber,
+    deterministicHash: deterministicHashOf(hashInput)
+  };
 }
 
 export interface ConstraintResult {
   passed: boolean;
-  confidenceImpact: number; // Contextual probability adjustment
+  confidenceImpact: number;
   reason: string;
   metadata?: any;
 }
@@ -75,11 +152,47 @@ export interface Constraint {
   evaluate(ctx: MarketContext): ConstraintResult;
 }
 
+/**
+ * Immutable system event with deterministic ordering.
+ */
 export interface SystemEvent {
-  timestamp: number;
-  eventId: string;
-  correlationId: string;
-  type: string;
-  payload: any;
-  marketSnapshot?: MarketContext;
+  readonly timestamp: number;
+  readonly sequenceNumber: number;
+  readonly eventId: string;
+  readonly correlationId: string;
+  readonly type: string;
+  readonly payload: any;
+  readonly marketSnapshot?: MarketContext;
+  readonly deterministicHash: string;
+  readonly previousEventHash?: string;
+}
+
+/**
+ * Create a deterministic SystemEvent.
+ * Browser-safe — no Node.js APIs used.
+ */
+export function createSystemEvent(
+  base: Omit<SystemEvent, 'deterministicHash' | 'sequenceNumber'> & {
+    sequenceNumber?: number;
+    previousEventHash?: string;
+  }
+): SystemEvent {
+  const sequenceNumber = base.sequenceNumber ?? 0;
+
+  const hashInput = JSON.stringify({
+    timestamp: base.timestamp,
+    sequenceNumber,
+    eventId: base.eventId,
+    correlationId: base.correlationId,
+    type: base.type,
+    payload: base.payload,
+    previousEventHash: base.previousEventHash
+  });
+
+  return {
+    ...base,
+    sequenceNumber,
+    deterministicHash: deterministicHashOf(hashInput),
+    previousEventHash: base.previousEventHash
+  };
 }

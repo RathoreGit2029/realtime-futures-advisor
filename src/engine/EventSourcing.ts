@@ -1,100 +1,84 @@
 import { SystemEvent, MarketContext } from './Types';
+import { Clock, SystemClock } from './DeterministicClock';
+import { DeterministicEventLog } from './DeterministicEventLog';
 
+/**
+ * EventLog singleton.
+ *
+ * The singleton is module-level, so it is reset on every service worker restart.
+ * That is acceptable — the event log is an in-session audit trail, not a
+ * persistence layer.  Cross-session persistence is handled by chrome.storage
+ * (active trades, journal stats) and PostgreSQL (resolved signals).
+ *
+ * To inject a deterministic clock for testing, call EventLog.getInstance(clock)
+ * BEFORE any other code creates the singleton.
+ */
 export class EventLog {
-  private events: SystemEvent[] = [];
-  private pendingQueue: SystemEvent[] = [];
-  private isProcessingQueue = false;
-  private static instance: EventLog;
+  private eventLog: DeterministicEventLog;
+  private static instance: EventLog | null = null;
 
-  private constructor() {}
+  private constructor(clock: Clock) {
+    this.eventLog = new DeterministicEventLog(clock);
+  }
 
-  public static getInstance(): EventLog {
+  public static getInstance(clock?: Clock): EventLog {
     if (!EventLog.instance) {
-      EventLog.instance = new EventLog();
+      EventLog.instance = new EventLog(clock ?? new SystemClock());
     }
     return EventLog.instance;
   }
 
-  /**
-   * Appends an event to the immutable log.
-   */
-  public append(event: Omit<SystemEvent, 'timestamp' | 'eventId'>): SystemEvent {
-    const fullEvent: SystemEvent = {
-      ...event,
-      timestamp: Date.now(),
-      eventId: crypto.randomUUID()
-    };
-    
-    // In memory store capped at 1000 elements to prevent OOM
-    this.events.push(fullEvent);
-    if (this.events.length > 1000) {
-      this.events.shift();
-    }
-    
-    // Async flush to PostgreSQL Ledger via queue processor
-    this.pendingQueue.push(fullEvent);
-    this.triggerQueueProcessor();
-
-    return fullEvent;
+  /** Reset singleton — only for tests */
+  public static resetInstance(): void {
+    EventLog.instance = null;
   }
 
-  private triggerQueueProcessor(): void {
-    if (this.isProcessingQueue) return;
-    this.isProcessingQueue = true;
-    this.processQueue();
+  public append(
+    event: Omit<SystemEvent, 'timestamp' | 'eventId' | 'sequenceNumber' | 'deterministicHash' | 'previousEventHash'>
+  ): SystemEvent {
+    return this.eventLog.append(
+      event.type,
+      event.correlationId,
+      event.payload,
+      event.marketSnapshot
+    );
   }
 
-  private async processQueue(): Promise<void> {
-    if (this.pendingQueue.length === 0) {
-      this.isProcessingQueue = false;
-      return;
-    }
-
-    const event = this.pendingQueue[0];
-    
-    try {
-      const response = await fetch('http://localhost:4000/api/advisor/events', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(event)
-      });
-      
-      if (response.ok) {
-        // Success: shift from queue and move to next
-        this.pendingQueue.shift();
-      } else {
-        // Backend error (e.g. rate limit, bad request): retry after delay
-        console.warn(`PostgreSQL Ledger error ${response.status}, retrying in 5s...`);
-        setTimeout(() => this.processQueue(), 5000);
-        return;
-      }
-    } catch (err: any) {
-      // Network unreachable: retry after delay
-      console.warn('PostgreSQL Ledger offline, retrying in 5s:', err.message);
-      setTimeout(() => this.processQueue(), 5000);
-      return;
-    }
-
-    // Schedule next processing step (100ms spacing to prevent socket flooding)
-    setTimeout(() => this.processQueue(), 100);
+  public getEvents(filter?: {
+    startTs?: number;
+    endTs?: number;
+    correlationId?: string;
+    startSequence?: number;
+    endSequence?: number;
+    eventType?: string;
+  }): SystemEvent[] {
+    return this.eventLog.getEvents({
+      startTimestamp: filter?.startTs,
+      endTimestamp: filter?.endTs,
+      correlationId: filter?.correlationId,
+      startSequence: filter?.startSequence,
+      endSequence: filter?.endSequence,
+      eventType: filter?.eventType
+    }).events;
   }
 
-  /**
-   * Replays events for a given correlation ID or time range
-   */
-  public getEvents(filter?: { startTs?: number; endTs?: number; correlationId?: string }): SystemEvent[] {
-    let result = this.events;
-    if (filter) {
-      if (filter.startTs) result = result.filter(e => e.timestamp >= filter.startTs!);
-      if (filter.endTs) result = result.filter(e => e.timestamp <= filter.endTs!);
-      if (filter.correlationId) result = result.filter(e => e.correlationId === filter.correlationId);
-    }
-    return result;
+  public replayFrom(sequenceNumber: number, callback: (event: SystemEvent) => void): void {
+    this.eventLog.replayFrom(sequenceNumber, callback);
+  }
+
+  public getReplayState() {
+    return this.eventLog.getReplayState();
   }
 
   public clear(): void {
-    this.events = [];
-    this.pendingQueue = [];
-    this.isProcessingQueue = false;
+    this.eventLog.clear();
+  }
+
+  public getEventCount(): number {
+    return this.eventLog.getEventCount();
+  }
+
+  public getMemoryUsage(): number {
+    return this.eventLog.getMemoryUsage();
   }
 }
