@@ -750,110 +750,116 @@ function runCalculations(symbol) {
   let ctx = null;
   data.dagDecision = null;
   const engine = getOrCreateEngine();
-  if (engine) {
-    try {
-      const { MarketRegime, MarketState } = AntigravityCore;
+  if (!engine) {
+    data.currentSignal = {
+      direction: "WAITING",
+      probability: 0,
+      patternName: "CRITICAL HALT",
+      reason: "Antigravity Engine not loaded",
+      triggerCatalyst: "System halted to prevent unvalidated execution."
+    };
+    broadcastHUDUpdate(symbol);
+    throw new Error(`Antigravity Engine is not initialized. Halted execution for ${symbol}.`);
+  }
 
-      const atrValues = calculateATR(data.candles, 14);
-      const curAtr = atrValues[atrValues.length - 1] || 0;
-      let atrRank = 50;
-      let isExpanding = false;
-      let isCompressing = false;
-      if (atrValues.length > 20) {
-        const recentAtrs = atrValues.slice(-100);
-        const smaller = recentAtrs.filter(val => val < curAtr).length;
-        atrRank = Math.round((smaller / recentAtrs.length) * 100);
-        const avgAtr20 = atrValues.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, atrValues.length);
-        isExpanding = curAtr > avgAtr20 * 1.15;
-        isCompressing = curAtr < avgAtr20 * 0.85;
-      }
+  try {
+    const { MarketRegime, MarketState } = AntigravityCore;
 
-      const htfDataReady = data.ema21_15m !== null && data.ema21_1h !== null;
-      const htfAligned = htfDataReady
-        ? ((curClose > data.ema21_15m && curClose > data.ema21_1h && curEma9 > curEma21) ||
-           (curClose < data.ema21_15m && curClose < data.ema21_1h && curEma9 < curEma21))
-        : false;
-
-      const dateObj = new Date(data.lastWsEventTime);
-      const utcDec = dateObj.getUTCHours() + dateObj.getUTCMinutes() / 60;
-      let sessionName = 'ASIA';
-      let isOverlapSession = false;
-      if (utcDec >= 8 && utcDec < 14) sessionName = 'LONDON';
-      else if (utcDec >= 14 && utcDec < 21) sessionName = 'NEW_YORK';
-      else if (utcDec >= 21 || utcDec < 2) sessionName = 'POST_NY_CHOP';
-      if (utcDec >= 13 && utcDec <= 14) isOverlapSession = true;
-
-      const emaDiff = Math.abs(curEma9 - curEma21);
-      const emaPct = (emaDiff / curClose) * 100;
-      const trendDir = emaPct < 0.05 ? 'SIDEWAYS' : (curEma9 > curEma21 ? 'UP' : 'DOWN');
-      const trendStrength = Math.min(100, Math.round(emaPct * 400));
-
-      const hasSweep = sweeps.bullishSweep || sweeps.bearishSweep;
-      const marketState = data.advisorMode === "MONITORING"
-        ? MarketState.NO_TRADE
-        : (hasSweep ? MarketState.EXECUTION_WINDOW : MarketState.NO_TRADE);
-
-      // Note: spread is synthetic (no real order-book data available in the extension).
-      // The SPREAD_EXPLOSION circuit breaker is disabled (maxSpreadToAtrRatio = Infinity)
-      // until real spread data is available.
-      const draftCtx = {
-        timestamp: data.lastWsEventTime,
-        symbol: symbol,
-        // regime is intentionally omitted — the engine classifies it from the other fields
-        marketState,
-        volatility: { atr: curAtr, isExpanding, isCompressing, historicalRank: atrRank },
-        liquidityState: {
-          hasSweep,
-          sweepQuality: computeSweepQuality(data.candles, sweeps),
-          recentSweepDirection: sweeps.bullishSweep ? 'BULLISH' : sweeps.bearishSweep ? 'BEARISH' : null
-        },
-        trendState: { direction: trendDir, strength: trendStrength, htfAlignment: htfAligned },
-        sessionState: {
-          currentSession: sessionName,
-          isOverlap: isOverlapSession,
-          minutesIntoSession: dateObj.getUTCMinutes()
-        },
-        displacementQuality: hasSweep ? Math.min(100, computeSweepQuality(data.candles, sweeps)) : 0,
-        spread: Math.max(curClose * 0.0001, curAtr * 0.02),
-        // confidence is set by the engine from the Bayesian posterior — do not set here
-        confidence: 50,
-        currentPrice: curClose
-      };
-
-      const evaluation = engine.evaluateMarket(draftCtx);
-      ctx = evaluation.context;
-      data.lastRegime = ctx.regime;
-
-      if (evaluation.halted) {
-        data.dagDecision = {
-          tradeEligible: false,
-          failedConstraints: ['CircuitBreaker'],
-          passedConstraints: [],
-          failureReasons: [evaluation.haltReason || 'Circuit breaker'],
-          finalConfidence: 0,
-          individualEvaluations: [],
-          totalEvaluationTime: 0,
-          deterministicHash: ''
-        };
-      } else {
-        data.dagDecision = evaluation.decision;
-
-        // Confidence override: when the Bayesian engine has insufficient data
-        // (< 20 trades for this regime), use the composite JS score as the
-        // confidence signal so the system is usable from day one.
-        // Once the engine is reliable, the Bayesian posterior takes over.
-        if (!engine.probEngine.getCalibratedBaseConfidence(ctx.regime).isReliable) {
-          data.dagDecision = {
-            ...data.dagDecision,
-            // finalConfidence will be overwritten in runAnalyzingCalculations
-            // using the composite score — see _compositeScoreOverride below
-            _useCompositeScore: true
-          };
-        }
-      }
-    } catch (err) {
-      console.error("SW: Constraint engine error:", err);
+    const atrValues = calculateATR(data.candles, 14);
+    const curAtr = atrValues[atrValues.length - 1] || 0;
+    let atrRank = 50;
+    let isExpanding = false;
+    let isCompressing = false;
+    if (atrValues.length > 20) {
+      const recentAtrs = atrValues.slice(-100);
+      const smaller = recentAtrs.filter(val => val < curAtr).length;
+      atrRank = Math.round((smaller / recentAtrs.length) * 100);
+      const avgAtr20 = atrValues.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, atrValues.length);
+      isExpanding = curAtr > avgAtr20 * 1.15;
+      isCompressing = curAtr < avgAtr20 * 0.85;
     }
+
+    const htfDataReady = data.ema21_15m !== null && data.ema21_1h !== null;
+    const htfAligned = htfDataReady
+      ? ((curClose > data.ema21_15m && curClose > data.ema21_1h && curEma9 > curEma21) ||
+         (curClose < data.ema21_15m && curClose < data.ema21_1h && curEma9 < curEma21))
+      : false;
+
+    const dateObj = new Date(data.lastWsEventTime);
+    const utcDec = dateObj.getUTCHours() + dateObj.getUTCMinutes() / 60;
+    let sessionName = 'ASIA';
+    let isOverlapSession = false;
+    if (utcDec >= 8 && utcDec < 14) sessionName = 'LONDON';
+    else if (utcDec >= 14 && utcDec < 21) sessionName = 'NEW_YORK';
+    else if (utcDec >= 21 || utcDec < 2) sessionName = 'POST_NY_CHOP';
+    if (utcDec >= 13 && utcDec <= 14) isOverlapSession = true;
+
+    const emaDiff = Math.abs(curEma9 - curEma21);
+    const emaPct = (emaDiff / curClose) * 100;
+    const trendDir = emaPct < 0.05 ? 'SIDEWAYS' : (curEma9 > curEma21 ? 'UP' : 'DOWN');
+    const trendStrength = Math.min(100, Math.round(emaPct * 400));
+
+    const hasSweep = sweeps.bullishSweep || sweeps.bearishSweep;
+    const marketState = data.advisorMode === "MONITORING"
+      ? MarketState.NO_TRADE
+      : (hasSweep ? MarketState.EXECUTION_WINDOW : MarketState.NO_TRADE);
+
+    // Note: spread is synthetic (no real order-book data available in the extension).
+    // The SPREAD_EXPLOSION circuit breaker is disabled (maxSpreadToAtrRatio = Infinity)
+    // until real spread data is available.
+    const draftCtx = {
+      timestamp: data.lastWsEventTime,
+      symbol: symbol,
+      // regime is intentionally omitted — the engine classifies it from the other fields
+      marketState,
+      volatility: { atr: curAtr, isExpanding, isCompressing, historicalRank: atrRank },
+      liquidityState: {
+        hasSweep,
+        sweepQuality: computeSweepQuality(data.candles, sweeps),
+        recentSweepDirection: sweeps.bullishSweep ? 'BULLISH' : sweeps.bearishSweep ? 'BEARISH' : null
+      },
+      trendState: { direction: trendDir, strength: trendStrength, htfAlignment: htfAligned },
+      sessionState: {
+        currentSession: sessionName,
+        isOverlap: isOverlapSession,
+        minutesIntoSession: dateObj.getUTCMinutes()
+      },
+      displacementQuality: hasSweep ? Math.min(100, computeSweepQuality(data.candles, sweeps)) : 0,
+      spread: Math.max(curClose * 0.0001, curAtr * 0.02),
+      // confidence is set by the engine from the Bayesian posterior — do not set here
+      confidence: 50,
+      currentPrice: curClose
+    };
+
+    const evaluation = engine.evaluateMarket(draftCtx);
+    ctx = evaluation.context;
+    data.lastRegime = ctx.regime;
+
+    if (evaluation.halted) {
+      data.dagDecision = {
+        tradeEligible: false,
+        failedConstraints: ['CircuitBreaker'],
+        passedConstraints: [],
+        failureReasons: [evaluation.haltReason || 'Circuit breaker'],
+        finalConfidence: 0,
+        individualEvaluations: [],
+        totalEvaluationTime: 0,
+        deterministicHash: ''
+      };
+    } else {
+      data.dagDecision = evaluation.decision;
+    }
+  } catch (err) {
+    console.error(`SW: Constraint engine evaluation error for ${symbol}:`, err);
+    data.currentSignal = {
+      direction: "WAITING",
+      probability: 0,
+      patternName: "CRITICAL HALT",
+      reason: `Engine error: ${err.message || err}`,
+      triggerCatalyst: "System halted to prevent unvalidated execution."
+    };
+    broadcastHUDUpdate(symbol);
+    throw err;
   }
 
   // --- RUN LIVE MODEL SCORING ---
@@ -1066,115 +1072,87 @@ function runAnalyzingCalculations(symbol, curClose, curEma9, curEma21, curRsi, m
   const useCustom = state.settings.targetMode === 'CUSTOM';
 
   // --- Constraint DAG gate ---
-  if (data.dagDecision) {
-    const isEligible = data.dagDecision.tradeEligible;
-    const failedList = data.dagDecision.failedConstraints || [];
-    const failReasons = data.dagDecision.failureReasons || [];
-
-    // Confidence resolution:
-    // If the Bayesian engine has enough data, use its posterior estimate.
-    // If not (< 20 trades for this regime), use the composite JS score so the
-    // system is usable from day one. The composite score is normalised to 0-100
-    // using the same formula as the fallback path.
-    let effectiveConfidence;
-    if (data.dagDecision._useCompositeScore) {
-      const totalScore = trendScore + smcScore + momentumScore;
-      effectiveConfidence = Math.max(0, Math.min(Math.round(((totalScore + 215) / 430) * 100), 100));
-    } else {
-      effectiveConfidence = Math.max(0, Math.min(data.dagDecision.finalConfidence, 100));
-    }
-
-    data.currentSignal = {
-      direction: "WAITING",
-      probability: effectiveConfidence,
-      patternName: activePattern,
-      reason: isEligible
-        ? (reasons.slice(0, 2).join(" + ") || "Constraint gate passed")
-        : (failReasons[0] || (failedList.length > 0 ? `Blocked: ${failedList.join(', ')}` : "Awaiting setup...")),
-      triggerCatalyst: `Conf: ${effectiveConfidence}% (${data.dagDecision._useCompositeScore ? 'composite' : 'bayesian'}). Passed: [${(data.dagDecision.passedConstraints || []).join(', ')}]. Failed: [${failedList.join(', ')}]`,
-      confidenceBreakdown: { trend: Math.abs(trendScore), smc: Math.abs(smcScore), momentum: Math.abs(momentumScore) }
-    };
-
-    const meetsThreshold = effectiveConfidence >= threshold;
-    if (isEligible && meetsThreshold && ctx && ctx.trendState) {
-      const intendedDirection = ctx.trendState.direction === 'UP' ? 'LONG' : (ctx.trendState.direction === 'DOWN' ? 'SHORT' : 'WAITING');
-      if (intendedDirection !== 'WAITING') {
-        // Run Execution Safety check
-        let entryPrice = curClose;
-        if (globalThis._swEngine && globalThis._swEngine.safetyLayer) {
-          const safety = globalThis._swEngine.safetyLayer.validateExecution(ctx, intendedDirection, curClose);
-          if (!safety.safe) {
-            data.currentSignal = {
-              direction: "WAITING",
-              probability: effectiveConfidence,
-              patternName: activePattern,
-              reason: safety.reason || "Execution safety limit exceeded",
-              triggerCatalyst: `Rejection: ${safety.reason}`,
-              confidenceBreakdown: { trend: Math.abs(trendScore), smc: Math.abs(smcScore), momentum: Math.abs(momentumScore) }
-            };
-            return;
-          }
-          entryPrice = safety.adjustedEntryPrice;
-        }
-
-        data.currentSignal.direction = intendedDirection;
-        data.currentSignal.probability = effectiveConfidence;
-        data.currentSignal.entry = entryPrice;
-
-        if (useCustom) {
-          const lev = parseFloat(state.settings.leverage) || 3;
-          const isPos = state.settings.customTpSlMode === 'position';
-          const slP = isPos ? parseFloat(state.settings.customStopLoss) : parseFloat(state.settings.customStopLoss) / lev;
-          const tpP = isPos ? parseFloat(state.settings.customTakeProfit) : parseFloat(state.settings.customTakeProfit) / lev;
-
-          if (intendedDirection === 'LONG') {
-            data.currentSignal.stopLoss = entryPrice * (1 - (slP / 100));
-            data.currentSignal.target1 = entryPrice * (1 + (tpP / 100));
-          } else {
-            data.currentSignal.stopLoss = entryPrice * (1 + (slP / 100));
-            data.currentSignal.target1 = entryPrice * (1 - (tpP / 100));
-          }
-          data.currentSignal.target2 = data.currentSignal.target1;
-        } else {
-          if (intendedDirection === 'LONG') {
-            const closestOB = orderBlocks.bullish.filter(ob => ob.unmitigated).pop();
-            const sLow = closestOB ? closestOB.low : Math.min(data.candles[data.candles.length - 2].low, data.candles[data.candles.length - 1].low);
-            data.currentSignal.stopLoss = Math.max(sLow, entryPrice * 0.985);
-            const risk = data.currentSignal.entry - data.currentSignal.stopLoss;
-            data.currentSignal.target1 = data.currentSignal.entry + risk * 1.5;
-          } else {
-            const closestOB = orderBlocks.bearish.filter(ob => ob.unmitigated).pop();
-            const sHigh = closestOB ? closestOB.high : Math.max(data.candles[data.candles.length - 2].high, data.candles[data.candles.length - 1].high);
-            data.currentSignal.stopLoss = Math.min(sHigh, entryPrice * 1.015);
-            const risk = data.currentSignal.stopLoss - data.currentSignal.entry;
-            data.currentSignal.target1 = data.currentSignal.entry - risk * 1.5;
-          }
-        }
-        applyTarget2(data.currentSignal, intendedDirection);
-        autoRegisterActiveTrade(symbol);
-      }
-    }
-    return;
+  if (!data.dagDecision) {
+    throw new Error(`State divergence detected: dagDecision is null for ${symbol}. Fail closed.`);
   }
 
-  // --- FALLBACK: engine bundle not loaded ---
-  // This path only runs when AntigravityCore failed to import.
-  // It is a pure additive scoring system — retail-grade, not institutional.
-  // It exists solely to keep the HUD alive when the bundle is missing.
-  // It does NOT register trades — it only updates the signal display.
-  const totalScore = trendScore + smcScore + momentumScore;
-  const clampedProb = Math.max(0, Math.min(Math.round(((totalScore + 215) / 430) * 100), 100));
+  const isEligible = data.dagDecision.tradeEligible;
+  const failedList = data.dagDecision.failedConstraints || [];
+  const failReasons = data.dagDecision.failureReasons || [];
+
+  // Confidence resolution: strictly use the Bayesian point estimate
+  const effectiveConfidence = Math.max(0, Math.min(data.dagDecision.finalConfidence, 100));
 
   data.currentSignal = {
     direction: "WAITING",
-    probability: clampedProb,
+    probability: effectiveConfidence,
     patternName: activePattern,
-    reason: reasons.slice(0, 2).join(" + ") || "Engine bundle not loaded — display only",
-    triggerCatalyst: `[FALLBACK] Composite: ${totalScore}. RSI: ${Math.round(curRsi)}. Catalysts: ${reasons.join(', ')}`,
+    reason: isEligible
+      ? (reasons.slice(0, 2).join(" + ") || "Constraint gate passed")
+      : (failReasons[0] || (failedList.length > 0 ? `Blocked: ${failedList.join(', ')}` : "Awaiting setup...")),
+    triggerCatalyst: `Conf: ${effectiveConfidence}% (bayesian). Passed: [${(data.dagDecision.passedConstraints || []).join(', ')}]. Failed: [${failedList.join(', ')}]`,
     confidenceBreakdown: { trend: Math.abs(trendScore), smc: Math.abs(smcScore), momentum: Math.abs(momentumScore) }
   };
-  // Fallback path intentionally does NOT call autoRegisterActiveTrade.
-  // Trades are only registered through the DAG path above.
+
+  const meetsThreshold = effectiveConfidence >= threshold;
+  if (isEligible && meetsThreshold && ctx && ctx.trendState) {
+    const intendedDirection = ctx.trendState.direction === 'UP' ? 'LONG' : (ctx.trendState.direction === 'DOWN' ? 'SHORT' : 'WAITING');
+    if (intendedDirection !== 'WAITING') {
+      // Run Execution Safety check
+      let entryPrice = curClose;
+      if (globalThis._swEngine && globalThis._swEngine.safetyLayer) {
+        const safety = globalThis._swEngine.safetyLayer.validateExecution(ctx, intendedDirection, curClose);
+        if (!safety.safe) {
+          data.currentSignal = {
+            direction: "WAITING",
+            probability: effectiveConfidence,
+            patternName: activePattern,
+            reason: safety.reason || "Execution safety limit exceeded",
+            triggerCatalyst: `Rejection: ${safety.reason}`,
+            confidenceBreakdown: { trend: Math.abs(trendScore), smc: Math.abs(smcScore), momentum: Math.abs(momentumScore) }
+          };
+          return;
+        }
+        entryPrice = safety.adjustedEntryPrice;
+      }
+
+      data.currentSignal.direction = intendedDirection;
+      data.currentSignal.probability = effectiveConfidence;
+      data.currentSignal.entry = entryPrice;
+
+      if (useCustom) {
+        const lev = parseFloat(state.settings.leverage) || 3;
+        const isPos = state.settings.customTpSlMode === 'position';
+        const slP = isPos ? parseFloat(state.settings.customStopLoss) : parseFloat(state.settings.customStopLoss) / lev;
+        const tpP = isPos ? parseFloat(state.settings.customTakeProfit) : parseFloat(state.settings.customTakeProfit) / lev;
+
+        if (intendedDirection === 'LONG') {
+          data.currentSignal.stopLoss = entryPrice * (1 - (slP / 100));
+          data.currentSignal.target1 = entryPrice * (1 + (tpP / 100));
+        } else {
+          data.currentSignal.stopLoss = entryPrice * (1 + (slP / 100));
+          data.currentSignal.target1 = entryPrice * (1 - (tpP / 100));
+        }
+        data.currentSignal.target2 = data.currentSignal.target1;
+      } else {
+        if (intendedDirection === 'LONG') {
+          const closestOB = orderBlocks.bullish.filter(ob => ob.unmitigated).pop();
+          const sLow = closestOB ? closestOB.low : Math.min(data.candles[data.candles.length - 2].low, data.candles[data.candles.length - 1].low);
+          data.currentSignal.stopLoss = Math.max(sLow, entryPrice * 0.985);
+          const risk = data.currentSignal.entry - data.currentSignal.stopLoss;
+          data.currentSignal.target1 = data.currentSignal.entry + risk * 1.5;
+        } else {
+          const closestOB = orderBlocks.bearish.filter(ob => ob.unmitigated).pop();
+          const sHigh = closestOB ? closestOB.high : Math.max(data.candles[data.candles.length - 2].high, data.candles[data.candles.length - 1].high);
+          data.currentSignal.stopLoss = Math.min(sHigh, entryPrice * 1.015);
+          const risk = data.currentSignal.stopLoss - data.currentSignal.entry;
+          data.currentSignal.target1 = data.currentSignal.entry - risk * 1.5;
+        }
+      }
+      applyTarget2(data.currentSignal, intendedDirection);
+      autoRegisterActiveTrade(symbol);
+    }
+  }
 }
 
 function runExitCalculations(symbol, curClose, curEma9, curEma21, curRsi, orderBlocks, sweeps) {
