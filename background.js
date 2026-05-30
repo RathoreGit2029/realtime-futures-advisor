@@ -25,6 +25,7 @@ var AntigravityCore = (() => {
   var AntigravityEngine_exports = {};
   __export(AntigravityEngine_exports, {
     AntigravityEngine: () => AntigravityEngine,
+    EventLog: () => EventLog,
     ExecutionSafetyLayer: () => ExecutionSafetyLayer,
     MarketRegime: () => MarketRegime,
     MarketState: () => MarketState,

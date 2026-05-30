@@ -1,5 +1,6 @@
 export * from './Types';
 export * from '../execution/SafetyLayer';
+export * from './EventSourcing';
 import { MarketContext, RawMarketInput, SystemEvent, createMarketContext } from './Types';
 import { EventLog } from './EventSourcing';
 import { MarketRegimeEngine } from './MarketRegimeEngine';
