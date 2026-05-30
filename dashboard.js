@@ -768,28 +768,38 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     symbols.forEach(sym => {
-      fetch(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${sym}`)
-        .then(r => {
-          if (!r.ok) throw new Error();
-          return r.json();
-        })
-        .catch(() => {
-          // Fallback to Spot price url
-          return fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}`).then(r => r.json());
-        })
-        .then(d => {
-          const price = parseFloat(d.price);
-          if (price > 0) {
-            priceCache[sym] = price;
-            if (activeTrades[sym]) {
-              updatePnLDisplay(sym);
-            } else {
-              updateDashboardEquity();
+      const endpoints = [
+        `https://fapi.binance.com/fapi/v1/ticker/price?symbol=${sym}`,
+        `https://www.binance.com/fapi/v1/ticker/price?symbol=${sym}`,
+        `https://api.binance.com/api/v3/ticker/price?symbol=${sym}`,
+        `https://www.binance.com/api/v3/ticker/price?symbol=${sym}`,
+        `https://data-api.binance.vision/api/v3/ticker/price?symbol=${sym}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent('https://fapi.binance.com/fapi/v1/ticker/price?symbol=' + sym)}`
+      ];
+
+      const tryFetchPrice = (idx) => {
+        if (idx >= endpoints.length) return;
+        fetch(endpoints[idx])
+          .then(r => {
+            if (!r.ok) throw new Error();
+            return r.json();
+          })
+          .then(d => {
+            const price = parseFloat(d.price);
+            if (price > 0) {
+              priceCache[sym] = price;
+              if (activeTrades[sym]) {
+                updatePnLDisplay(sym);
+              } else {
+                updateDashboardEquity();
+              }
+              updateTickerFilterPrices();
             }
-            updateTickerFilterPrices();
-          }
-        })
-        .catch(() => {});
+          })
+          .catch(() => tryFetchPrice(idx + 1));
+      };
+
+      tryFetchPrice(0);
     });
   }
 
