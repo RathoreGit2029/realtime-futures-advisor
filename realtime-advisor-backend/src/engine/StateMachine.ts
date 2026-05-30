@@ -1,5 +1,5 @@
-import { MarketState, MarketContext } from './Types';
-import { EventLog } from './EventSourcing';
+import { MarketState, MarketContext } from './Types.js';
+import { EventLog } from './EventSourcing.js';
 
 const VALID_TRANSITIONS: Record<MarketState, Set<MarketState>> = {
   [MarketState.NO_TRADE]: new Set([

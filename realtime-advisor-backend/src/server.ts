@@ -1,13 +1,16 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyWebsocket from '@fastify/websocket';
 import { db } from './db/index.js';
 import { advisorSignals } from './db/schema.js';
 import { eq, desc, lt, and, or, sql } from 'drizzle-orm';
 import { DatabaseSync } from 'node:sqlite';
+import { BinanceWebSocketManager } from './engine/BinanceWebSocketManager.js';
 
 const fastify = Fastify({ logger: true });
 
 fastify.register(cors, { origin: '*' });
+fastify.register(fastifyWebsocket);
 
 // --- Authoritative SQLite Event Log Setup ---
 const dbSync = new DatabaseSync('events.db');
@@ -35,6 +38,42 @@ dbSync.exec(`
     timestamp INTEGER NOT NULL
   );
 `);
+
+// Initialize execution manager
+const manager = BinanceWebSocketManager.getInstance();
+manager.init(dbSync);
+
+// WebSocket real-time client route
+fastify.register(async function (fastify) {
+  fastify.get('/ws', { websocket: true }, (connection: any, req: any) => {
+    console.log('🔌 Extension client connected to backend WebSocket.');
+    manager.registerClient(connection.socket);
+
+    connection.socket.on('message', (message: string) => {
+      try {
+        const msg = JSON.parse(message);
+        if (msg.type === 'SUBSCRIBE_SYMBOLS') {
+          const symbols: string[] = msg.symbols || [];
+          console.log(`🔌 Client subscribed to symbols: ${symbols.join(', ')}`);
+          for (const sym of symbols) {
+            manager.subscribe(sym, connection.socket, (data) => {
+              connection.socket.send(JSON.stringify(data));
+            });
+          }
+        } else if (msg.type === 'UPDATE_SETTINGS') {
+          manager.updateSettings(msg.settings);
+        }
+      } catch (e) {
+        console.error('Error handling websocket message:', e);
+      }
+    });
+
+    connection.socket.on('close', () => {
+      console.log('🔌 Extension client disconnected.');
+      manager.unregisterClient(connection.socket);
+    });
+  });
+});
 
 fastify.get('/health', async () => ({
   service: 'realtime-advisor-backend',

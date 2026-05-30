@@ -85,6 +85,10 @@
       if (settings.enableAudio) {
         if (payload.type === 'SOUND') {
           playSyntheticSound(payload.sound);
+        } else if (payload.type === 'SPEECH') {
+          const speech = new SpeechSynthesisUtterance(payload.text);
+          speech.rate = 0.95;
+          window.speechSynthesis.speak(speech);
         } else if (payload.type === 'ENTRY') {
           const now = Date.now();
           if (now - lastSpokenTime >= SPEECH_COOLDOWN_MS) {
