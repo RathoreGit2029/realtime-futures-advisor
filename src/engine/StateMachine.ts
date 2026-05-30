@@ -121,6 +121,22 @@ export class StateMachine {
       return;
     }
 
+    const isFirstTick = !this.symbolStates.has(symbol);
+    if (isFirstTick) {
+      this.symbolStates.set(symbol, nextState);
+      this.logger.append({
+        type: 'StateTransition',
+        correlationId: symbol,
+        payload: {
+          from: 'INITIALIZING',
+          to: nextState,
+          reason: `Cold start initialization: ${reason}`
+        }
+      });
+      console.log(`[FSM] ${symbol} initialized to ${nextState}. Reason: Cold start initialization`);
+      return;
+    }
+
     const validTransitions = VALID_TRANSITIONS[currentState];
     if (!validTransitions || !validTransitions.has(nextState)) {
       throw new Error(

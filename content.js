@@ -346,7 +346,7 @@
             <span class="agy-status-dot" id="agy-status-indicator"></span>
             <span id="agy-status-text">Connecting...</span>
           </div>
-          <div>SMC DB Synced HUD v1.1.0</div>
+          <div>SMC DB Synced HUD v${chrome.runtime.getManifest().version}</div>
         </div>
       </div>
 
@@ -884,7 +884,12 @@
   // --- AUDIO SYNTHESIZER ---
   let _audioCtx = null;
   function getAudioContext() {
-    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!_audioCtx) {
+      _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (_audioCtx.state === 'suspended') {
+      _audioCtx.resume().catch(() => {});
+    }
     return _audioCtx;
   }
 
@@ -927,6 +932,22 @@
       console.warn("Audio Context playback warning:", e);
     }
   }
+
+  function unlockAudioContext() {
+    try {
+      const ctx = getAudioContext();
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume().then(() => {
+          window.removeEventListener('click', unlockAudioContext);
+          window.removeEventListener('mousedown', unlockAudioContext);
+        });
+      }
+    } catch (e) {
+      console.warn("Unable to unlock AudioContext:", e);
+    }
+  }
+  window.addEventListener('click', unlockAudioContext);
+  window.addEventListener('mousedown', unlockAudioContext);
 
   // --- BOOTSTRAP ---
   loadSettings(() => {

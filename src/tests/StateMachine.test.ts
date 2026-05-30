@@ -1,5 +1,5 @@
 import { StateMachine } from '../engine/StateMachine';
-import { MarketState, MarketRegime, MarketState as StateType } from '../engine/Types';
+import { MarketState } from '../engine/Types';
 import { EventLog } from '../engine/EventSourcing';
 import { DeterministicTestClock } from '../engine/DeterministicClock';
 
@@ -18,8 +18,22 @@ describe('Explicit State Machine', () => {
     expect(fsm.getCurrentState('BTCUSDT')).toBe(MarketState.NO_TRADE);
   });
 
-  test('valid transition flow succeeds and logs StateTransition events', () => {
+  test('cold start initializes directly to any state without matrix validation', () => {
     const symbol = 'BTCUSDT';
+    // Cold start directly to RETRACEMENT
+    fsm.transitionTo(symbol, MarketState.RETRACEMENT, 'Cold start detection');
+    expect(fsm.getCurrentState(symbol)).toBe(MarketState.RETRACEMENT);
+
+    const events = EventLog.getInstance().getEvents({ eventType: 'StateTransition' });
+    expect(events).toHaveLength(1);
+    expect(events[0].payload.from).toBe('INITIALIZING');
+    expect(events[0].payload.to).toBe(MarketState.RETRACEMENT);
+  });
+
+  test('valid transition flow succeeds and logs StateTransition events after initialization', () => {
+    const symbol = 'BTCUSDT';
+    // Initialize FSM state for the symbol to NO_TRADE to simulate already initialized state
+    fsm.forceState(symbol, MarketState.NO_TRADE);
     
     // 1. NO_TRADE -> ACCUMULATION (valid)
     fsm.transitionTo(symbol, MarketState.ACCUMULATION, 'Entering trading session');
@@ -54,8 +68,10 @@ describe('Explicit State Machine', () => {
     expect(events[1].payload.to).toBe(MarketState.LIQUIDITY_SWEEP);
   });
 
-  test('invalid transitions throw a validation error immediately to fail closed', () => {
+  test('invalid transitions throw a validation error immediately to fail closed after initialization', () => {
     const symbol = 'BTCUSDT';
+    // Initialize FSM state for the symbol to NO_TRADE
+    fsm.forceState(symbol, MarketState.NO_TRADE);
     expect(fsm.getCurrentState(symbol)).toBe(MarketState.NO_TRADE);
 
     // Illegal: NO_TRADE -> ACTIVE_POSITION directly without setup/execution window

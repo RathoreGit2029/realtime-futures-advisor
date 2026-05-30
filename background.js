@@ -995,6 +995,21 @@ var AntigravityCore = (() => {
       if (currentState === nextState) {
         return;
       }
+      const isFirstTick = !this.symbolStates.has(symbol);
+      if (isFirstTick) {
+        this.symbolStates.set(symbol, nextState);
+        this.logger.append({
+          type: "StateTransition",
+          correlationId: symbol,
+          payload: {
+            from: "INITIALIZING",
+            to: nextState,
+            reason: `Cold start initialization: ${reason}`
+          }
+        });
+        console.log(`[FSM] ${symbol} initialized to ${nextState}. Reason: Cold start initialization`);
+        return;
+      }
       const validTransitions = VALID_TRANSITIONS[currentState];
       if (!validTransitions || !validTransitions.has(nextState)) {
         throw new Error(
@@ -1359,6 +1374,7 @@ let activePollIntervals = {};
 // Helper to extract top-level settings keys
 function extractSettings(items) {
   const settings = { ...state.settings };
+  if (!items) return settings;
   const keys = [
     "timeframe", "leverage", "triggerThreshold", "customStopLoss", 
     "customTakeProfit", "targetMode", "customTpSlMode", "enableTechnical", 
@@ -2434,15 +2450,15 @@ function runAnalyzingCalculations(symbol, curClose, curEma9, curEma21, curRsi, m
         data.currentSignal.target2 = data.currentSignal.target1;
       } else {
         if (intendedDirection === 'LONG') {
-          const closestOB = orderBlocks.bullish.filter(ob => ob.unmitigated).pop();
+          const closestOB = orderBlocks.bullish.filter(ob => ob.unmitigated && ob.low < entryPrice).pop();
           const sLow = closestOB ? closestOB.low : Math.min(data.candles[data.candles.length - 2].low, data.candles[data.candles.length - 1].low);
-          data.currentSignal.stopLoss = Math.max(sLow, entryPrice * 0.985);
+          data.currentSignal.stopLoss = Math.min(Math.max(sLow, entryPrice * 0.985), entryPrice * 0.998);
           const risk = data.currentSignal.entry - data.currentSignal.stopLoss;
           data.currentSignal.target1 = data.currentSignal.entry + risk * 1.5;
         } else {
-          const closestOB = orderBlocks.bearish.filter(ob => ob.unmitigated).pop();
+          const closestOB = orderBlocks.bearish.filter(ob => ob.unmitigated && ob.high > entryPrice).pop();
           const sHigh = closestOB ? closestOB.high : Math.max(data.candles[data.candles.length - 2].high, data.candles[data.candles.length - 1].high);
-          data.currentSignal.stopLoss = Math.min(sHigh, entryPrice * 1.015);
+          data.currentSignal.stopLoss = Math.max(Math.min(sHigh, entryPrice * 1.015), entryPrice * 1.002);
           const risk = data.currentSignal.stopLoss - data.currentSignal.entry;
           data.currentSignal.target1 = data.currentSignal.entry - risk * 1.5;
         }
@@ -2683,7 +2699,7 @@ function markUserActionTaken(symbol) {
 function dispatchAudioEvent(symbol, payload) {
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs) {
-      if (tab.url && tab.url.includes("binance.com") && tab.url.includes(symbol.toLowerCase())) {
+      if (tab.url && tab.url.includes("binance.com") && tab.url.toLowerCase().includes(symbol.toLowerCase())) {
         chrome.tabs.sendMessage(tab.id, { type: "PLAY_AUDIO", payload }).catch(() => {});
       }
     }
@@ -2696,7 +2712,7 @@ function broadcastHUDUpdate(symbol) {
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs) {
       // Check symbol matching or url matching
-      if (tab.url && tab.url.includes("binance.com") && tab.url.includes(symbol.toLowerCase())) {
+      if (tab.url && tab.url.includes("binance.com") && tab.url.toLowerCase().includes(symbol.toLowerCase())) {
         chrome.tabs.sendMessage(tab.id, { type: "HUD_UPDATE", symbol, payload }).catch(() => {});
       }
     }
