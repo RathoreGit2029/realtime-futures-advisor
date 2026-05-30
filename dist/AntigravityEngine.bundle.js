@@ -900,7 +900,9 @@ var AntigravityCore = (() => {
     ["NO_TRADE" /* NO_TRADE */]: /* @__PURE__ */ new Set([
       "NO_TRADE" /* NO_TRADE */,
       "ACCUMULATION" /* ACCUMULATION */,
-      "LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */
+      "LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */,
+      "DISPLACEMENT" /* DISPLACEMENT */,
+      "RETRACEMENT" /* RETRACEMENT */
     ]),
     ["ACCUMULATION" /* ACCUMULATION */]: /* @__PURE__ */ new Set([
       "NO_TRADE" /* NO_TRADE */,

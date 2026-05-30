@@ -1,6 +1,6 @@
 {
   "name": "realtime-futures-advisor",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Binance Futures Real-Time Advisor Chrome extension",
   "main": "background.js",
   "scripts": {
