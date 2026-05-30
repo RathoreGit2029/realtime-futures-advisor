@@ -488,19 +488,32 @@ function fetchHistoricalCandles(symbol) {
 function fallbackToFullFetch(symbol) {
   const limit = 150;
   const interval = state.settings.timeframe;
-  const futuresUrl = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-  const spotUrl = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+  
+  const endpoints = [
+    { url: `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, spot: false },
+    { url: `https://www.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, spot: false },
+    { url: `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, spot: true },
+    { url: `https://www.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, spot: true }
+  ];
 
-  fetch(futuresUrl)
-    .then(res => {
-      if (!res.ok) throw new Error("Futures blocked");
-      symbolData[symbol].useSpotAPI = false;
-      return res.json();
-    })
-    .catch(() => {
-      symbolData[symbol].useSpotAPI = true;
-      return fetch(spotUrl).then(res => res.json());
-    })
+  const tryFetch = (index) => {
+    if (index >= endpoints.length) {
+      return Promise.reject(new Error("All Binance endpoints failed to fetch"));
+    }
+    const ep = endpoints[index];
+    return fetch(ep.url)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        symbolData[symbol].useSpotAPI = ep.spot;
+        return res.json();
+      })
+      .catch((err) => {
+        console.warn(`⚠️ Endpoint failed (${ep.url}):`, err.message);
+        return tryFetch(index + 1);
+      });
+  };
+
+  tryFetch(0)
     .then(data => {
       if (!Array.isArray(data)) return;
       symbolData[symbol].candles = data.map(c => ({
