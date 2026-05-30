@@ -1341,18 +1341,19 @@ function extractSettings(items) {
 
 // 1. Initial State Hydration from local storage
 chrome.storage.local.get(null, (items) => {
-  state.settings = extractSettings(items);
-  if (items.journalStats) state.journalStats = items.journalStats;
-  if (items.sandboxJournalStats) state.sandboxJournalStats = items.sandboxJournalStats;
-  if (items.consecutiveLosses !== undefined) state.consecutiveLosses = items.consecutiveLosses;
-  if (items.walletBalance !== undefined) state.walletBalance = items.walletBalance;
-  if (items.sandboxWalletBalance !== undefined) state.sandboxWalletBalance = items.sandboxWalletBalance;
+  const safeItems = items || {};
+  state.settings = extractSettings(safeItems);
+  if (safeItems.journalStats) state.journalStats = safeItems.journalStats;
+  if (safeItems.sandboxJournalStats) state.sandboxJournalStats = safeItems.sandboxJournalStats;
+  if (safeItems.consecutiveLosses !== undefined) state.consecutiveLosses = safeItems.consecutiveLosses;
+  if (safeItems.walletBalance !== undefined) state.walletBalance = safeItems.walletBalance;
+  if (safeItems.sandboxWalletBalance !== undefined) state.sandboxWalletBalance = safeItems.sandboxWalletBalance;
 
   // Restore active trades
-  for (const key in items) {
+  for (const key in safeItems) {
     if (key.startsWith('activeTrade_')) {
       const sym = key.replace('activeTrade_', '');
-      state.activeTrades[sym] = items[key];
+      state.activeTrades[sym] = safeItems[key];
     }
   }
 
@@ -1405,7 +1406,7 @@ function connectBackendWebSocket() {
           
           // Clear active trades and replace them
           chrome.storage.local.get(null, (items) => {
-            const keysToRemove = Object.keys(items).filter(k => k.startsWith('activeTrade_'));
+            const keysToRemove = Object.keys(items || {}).filter(k => k.startsWith('activeTrade_'));
             chrome.storage.local.remove(keysToRemove, () => {
               for (const sym in state.activeTrades) {
                 chrome.storage.local.set({ ['activeTrade_' + sym]: state.activeTrades[sym] });
@@ -1430,7 +1431,7 @@ function connectBackendWebSocket() {
           state.activeTrades = msg.activeTrades;
           // Clear and rewrite storage active trades
           chrome.storage.local.get(null, (items) => {
-            const keysToRemove = Object.keys(items).filter(k => k.startsWith('activeTrade_'));
+            const keysToRemove = Object.keys(items || {}).filter(k => k.startsWith('activeTrade_'));
             chrome.storage.local.remove(keysToRemove, () => {
               for (const sym in state.activeTrades) {
                 chrome.storage.local.set({ ['activeTrade_' + sym]: state.activeTrades[sym] });
