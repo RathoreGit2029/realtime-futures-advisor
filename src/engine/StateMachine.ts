@@ -5,7 +5,9 @@ const VALID_TRANSITIONS: Record<MarketState, Set<MarketState>> = {
   [MarketState.NO_TRADE]: new Set([
     MarketState.NO_TRADE,
     MarketState.ACCUMULATION,
-    MarketState.LIQUIDITY_SWEEP
+    MarketState.LIQUIDITY_SWEEP,
+    MarketState.DISPLACEMENT,
+    MarketState.RETRACEMENT
   ]),
   [MarketState.ACCUMULATION]: new Set([
     MarketState.NO_TRADE,

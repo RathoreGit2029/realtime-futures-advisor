@@ -58,9 +58,11 @@ function getOrCreateEngine() {
     // Trigger async hydration from backend SQLite DB
     logger.hydrate()
       .then(() => {
+        globalThis._engineHydrated = true;
         console.log('⚡ Event Sourcing: Hydration complete from backend SQLite database.');
       })
       .catch(e => {
+        globalThis._engineHydrated = true; // Proceed anyway if it fails
         console.warn('⚠️ Event Sourcing: Hydration failed:', e);
       });
   }
@@ -627,6 +629,7 @@ function connectWebSocket(symbol) {
   activeSockets[symbol] = ws;
 
   ws.onmessage = (event) => {
+    if (!globalThis._engineHydrated) return; // Wait for DB hydration to prevent sequence conflicts
     try {
       const data = JSON.parse(event.data);
       const stream = data.stream;
