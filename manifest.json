@@ -12,6 +12,8 @@
     "https://*.binance.com/*",
     "https://fapi.binance.com/*",
     "https://api.binance.com/*",
+    "https://data-api.binance.vision/*",
+    "https://api.allorigins.win/*",
     "http://localhost:4000/*"
   ],
   "action": {

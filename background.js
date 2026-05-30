@@ -1776,7 +1776,9 @@ function fallbackToFullFetch(symbol) {
     { url: `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, spot: false },
     { url: `https://www.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, spot: false },
     { url: `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, spot: true },
-    { url: `https://www.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, spot: true }
+    { url: `https://www.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, spot: true },
+    { url: `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, spot: true },
+    { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`)}`, spot: false }
   ];
 
   const tryFetch = (index) => {
