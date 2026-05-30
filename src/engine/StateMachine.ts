@@ -8,6 +8,7 @@ const VALID_TRANSITIONS: Record<MarketState, Set<MarketState>> = {
     MarketState.LIQUIDITY_SWEEP,
     MarketState.DISPLACEMENT,
     MarketState.RETRACEMENT,
+    MarketState.EXECUTION_WINDOW,
     MarketState.ACTIVE_POSITION
   ]),
   [MarketState.ACCUMULATION]: new Set([
@@ -15,6 +16,8 @@ const VALID_TRANSITIONS: Record<MarketState, Set<MarketState>> = {
     MarketState.ACCUMULATION,
     MarketState.LIQUIDITY_SWEEP,
     MarketState.DISPLACEMENT,
+    MarketState.RETRACEMENT,
+    MarketState.EXECUTION_WINDOW,
     MarketState.ACTIVE_POSITION
   ]),
   [MarketState.LIQUIDITY_SWEEP]: new Set([

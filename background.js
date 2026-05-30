@@ -906,6 +906,7 @@ var AntigravityCore = (() => {
       "LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */,
       "DISPLACEMENT" /* DISPLACEMENT */,
       "RETRACEMENT" /* RETRACEMENT */,
+      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */,
       "ACTIVE_POSITION" /* ACTIVE_POSITION */
     ]),
     ["ACCUMULATION" /* ACCUMULATION */]: /* @__PURE__ */ new Set([
@@ -913,6 +914,8 @@ var AntigravityCore = (() => {
       "ACCUMULATION" /* ACCUMULATION */,
       "LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */,
       "DISPLACEMENT" /* DISPLACEMENT */,
+      "RETRACEMENT" /* RETRACEMENT */,
+      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */,
       "ACTIVE_POSITION" /* ACTIVE_POSITION */
     ]),
     ["LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */]: /* @__PURE__ */ new Set([
