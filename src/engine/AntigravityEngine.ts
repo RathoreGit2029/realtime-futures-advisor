@@ -1,4 +1,5 @@
 export * from './Types';
+export * from '../execution/SafetyLayer';
 import { MarketContext, RawMarketInput, SystemEvent, createMarketContext } from './Types';
 import { EventLog } from './EventSourcing';
 import { MarketRegimeEngine } from './MarketRegimeEngine';
@@ -6,6 +7,7 @@ import { ConstraintEngine, ConstraintDecision } from './ConstraintEngine';
 import { ProbabilityCalibrationEngine } from './ProbabilityCalibration';
 import { CircuitBreakerEngine } from '../risk/CircuitBreakers';
 import { ExplainabilityAPI } from './ExplainabilityAPI';
+import { ExecutionSafetyLayer } from '../execution/SafetyLayer';
 
 import { RegimeConstraint } from '../constraints/RegimeConstraint';
 import { VolatilityConstraint } from '../constraints/VolatilityConstraint';
@@ -25,6 +27,7 @@ export class AntigravityEngine {
   public constraintEngine = new ConstraintEngine();
   public probEngine = new ProbabilityCalibrationEngine();
   public circuitBreakers = new CircuitBreakerEngine();
+  public safetyLayer = new ExecutionSafetyLayer();
   public api = new ExplainabilityAPI();
 
   constructor() {

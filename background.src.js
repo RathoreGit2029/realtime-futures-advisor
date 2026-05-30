@@ -104,6 +104,18 @@ chrome.storage.local.get(null, (items) => {
       state.activeTrades[sym] = items[key];
     }
   }
+
+  // Restore viewedSymbols from local storage
+  if (items.viewedSymbols && Array.isArray(items.viewedSymbols)) {
+    viewedSymbols = new Set(items.viewedSymbols);
+    console.log("💾 Antigravity SW: Restored viewedSymbols from local storage:", items.viewedSymbols);
+    for (const sym of viewedSymbols) {
+      if (!activeSockets[sym]) {
+        initializeSymbolContext(sym);
+      }
+    }
+  }
+
   console.log("💾 Antigravity SW: Restored states from local storage.");
   scanActiveTabs(); // Immediate scan on start
 });
@@ -198,7 +210,13 @@ function scanActiveTabs() {
       }
     }
     
+    const prevViewedArray = Array.from(viewedSymbols).sort();
+    const currentSymbolsArray = Array.from(currentSymbols).sort();
+    const hasChanged = prevViewedArray.join(',') !== currentSymbolsArray.join(',');
     viewedSymbols = currentSymbols;
+    if (hasChanged) {
+      chrome.storage.local.set({ viewedSymbols: currentSymbolsArray });
+    }
   });
 }
 setInterval(scanActiveTabs, 3000);
@@ -326,8 +344,105 @@ function fetchExchangePrecision(symbol) {
     .catch(() => {});
 }
 
-// Fetch Initial Historical Candles
+// Save Candle Cache to Chrome Storage
+function saveCandleCache(symbol) {
+  const data = symbolData[symbol];
+  if (!data || !Array.isArray(data.candles) || data.candles.length === 0) return;
+  const interval = state.settings.timeframe;
+  const key = `candleCache_${symbol}_${interval}`;
+  chrome.storage.local.set({ [key]: data.candles });
+}
+
+// Fetch Initial Historical Candles with Cache and Gap-Fill
 function fetchHistoricalCandles(symbol) {
+  const limit = 150;
+  const interval = state.settings.timeframe;
+  const cacheKey = `candleCache_${symbol}_${interval}`;
+
+  chrome.storage.local.get([cacheKey], (items) => {
+    const cachedCandles = items[cacheKey];
+
+    if (Array.isArray(cachedCandles) && cachedCandles.length > 0) {
+      const lastCandle = cachedCandles[cachedCandles.length - 1];
+      const gapMs = Date.now() - lastCandle.time;
+      const intervalMs = timeframeToMs(interval);
+      const gapIntervals = gapMs / intervalMs;
+
+      if (gapIntervals < limit) {
+        console.log(`🔌 Candle cache found for ${symbol} (${interval}). Gap is ${Math.round(gapIntervals)} candles. Performing gap-fill...`);
+        // We fetch starting from the last candle's open time to overlap and update the last unclosed candle
+        const startTime = lastCandle.time;
+        const futuresUrl = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${startTime}`;
+        const spotUrl = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&startTime=${startTime}`;
+
+        fetch(futuresUrl)
+          .then(res => {
+            if (!res.ok) throw new Error("Futures blocked");
+            symbolData[symbol].useSpotAPI = false;
+            return res.json();
+          })
+          .catch(() => {
+            symbolData[symbol].useSpotAPI = true;
+            return fetch(spotUrl).then(res => res.json());
+          })
+          .then(data => {
+            if (!Array.isArray(data)) {
+              fallbackToFullFetch(symbol);
+              return;
+            }
+
+            const merged = [...cachedCandles];
+            data.forEach(c => {
+              const time = parseInt(c[0]);
+              const parsed = {
+                time,
+                open: parseFloat(c[1]),
+                high: parseFloat(c[2]),
+                low: parseFloat(c[3]),
+                close: parseFloat(c[4]),
+                volume: parseFloat(c[5])
+              };
+              const existingIdx = merged.findIndex(mc => mc.time === time);
+              if (existingIdx !== -1) {
+                merged[existingIdx] = parsed;
+              } else {
+                merged.push(parsed);
+              }
+            });
+
+            merged.sort((a, b) => a.time - b.time);
+            if (merged.length > 200) {
+              merged.splice(0, merged.length - 200);
+            }
+
+            symbolData[symbol].candles = merged;
+            if (merged.length > 0) {
+              symbolData[symbol].currentTickPrice = merged[merged.length - 1].close;
+            }
+            console.log(`📊 History loaded via gap-fill: ${merged.length} candles for ${symbol}`);
+            saveCandleCache(symbol);
+
+            // Start socket and polling
+            connectWebSocket(symbol);
+            fetchRestMarketData(symbol);
+
+            if (activePollIntervals[symbol]) clearInterval(activePollIntervals[symbol]);
+            activePollIntervals[symbol] = setInterval(() => fetchRestMarketData(symbol), 5 * 60 * 1000);
+          })
+          .catch(err => {
+            console.warn(`⚠️ Gap-fill failed for ${symbol}, falling back to full fetch:`, err.message);
+            fallbackToFullFetch(symbol);
+          });
+        return;
+      }
+    }
+
+    // No cache or gap too large -> full fetch
+    fallbackToFullFetch(symbol);
+  });
+}
+
+function fallbackToFullFetch(symbol) {
   const limit = 150;
   const interval = state.settings.timeframe;
   const futuresUrl = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
@@ -358,17 +473,18 @@ function fetchHistoricalCandles(symbol) {
       if (len > 0) {
         symbolData[symbol].currentTickPrice = symbolData[symbol].candles[len - 1].close;
       }
-      console.log(`📊 History loaded: ${len} candles for ${symbol}`);
+      console.log(`📊 Full history loaded: ${len} candles for ${symbol}`);
+      saveCandleCache(symbol);
 
       // Start socket and polling
       connectWebSocket(symbol);
       fetchRestMarketData(symbol);
-      
+
       if (activePollIntervals[symbol]) clearInterval(activePollIntervals[symbol]);
       activePollIntervals[symbol] = setInterval(() => fetchRestMarketData(symbol), 5 * 60 * 1000);
     })
     .catch(err => {
-      console.error(`❌ Failed to sync history for ${symbol}:`, err.message);
+      console.error(`❌ Failed to sync full history for ${symbol}:`, err.message);
       setTimeout(() => initializeSymbolContext(symbol), 5000);
     });
 }
@@ -509,11 +625,13 @@ function connectWebSocket(symbol) {
           volume: parseFloat(k.v)
         };
 
+        let candleAdded = false;
         if (sData.candles.length > 0 && sData.candles[sData.candles.length - 1].time === candleTime) {
           sData.candles[sData.candles.length - 1] = latestCandle;
         } else {
           sData.candles.push(latestCandle);
           if (sData.candles.length > 200) sData.candles.shift();
+          candleAdded = true;
           
           const activeTrade = state.activeTrades[symbol];
           if (activeTrade && (activeTrade.status === "ACTIVE" || activeTrade.status === "SANDBOX_ACTIVE")) {
@@ -527,6 +645,10 @@ function connectWebSocket(symbol) {
               chrome.storage.local.set({ ['activeTrade_' + symbol]: activeTrade });
             }
           }
+        }
+
+        if (candleAdded || k.x) {
+          saveCandleCache(symbol);
         }
         runCalculations(symbol);
       } else if (!isTfStream && is1mStream && !is1mTimeframe) {
@@ -977,9 +1099,27 @@ function runAnalyzingCalculations(symbol, curClose, curEma9, curEma21, curRsi, m
     if (isEligible && meetsThreshold && ctx && ctx.trendState) {
       const intendedDirection = ctx.trendState.direction === 'UP' ? 'LONG' : (ctx.trendState.direction === 'DOWN' ? 'SHORT' : 'WAITING');
       if (intendedDirection !== 'WAITING') {
+        // Run Execution Safety check
+        let entryPrice = curClose;
+        if (globalThis._swEngine && globalThis._swEngine.safetyLayer) {
+          const safety = globalThis._swEngine.safetyLayer.validateExecution(ctx, intendedDirection, curClose);
+          if (!safety.safe) {
+            data.currentSignal = {
+              direction: "WAITING",
+              probability: effectiveConfidence,
+              patternName: activePattern,
+              reason: safety.reason || "Execution safety limit exceeded",
+              triggerCatalyst: `Rejection: ${safety.reason}`,
+              confidenceBreakdown: { trend: Math.abs(trendScore), smc: Math.abs(smcScore), momentum: Math.abs(momentumScore) }
+            };
+            return;
+          }
+          entryPrice = safety.adjustedEntryPrice;
+        }
+
         data.currentSignal.direction = intendedDirection;
         data.currentSignal.probability = effectiveConfidence;
-        data.currentSignal.entry = curClose;
+        data.currentSignal.entry = entryPrice;
 
         if (useCustom) {
           const lev = parseFloat(state.settings.leverage) || 3;
@@ -988,24 +1128,24 @@ function runAnalyzingCalculations(symbol, curClose, curEma9, curEma21, curRsi, m
           const tpP = isPos ? parseFloat(state.settings.customTakeProfit) : parseFloat(state.settings.customTakeProfit) / lev;
 
           if (intendedDirection === 'LONG') {
-            data.currentSignal.stopLoss = curClose * (1 - (slP / 100));
-            data.currentSignal.target1 = curClose * (1 + (tpP / 100));
+            data.currentSignal.stopLoss = entryPrice * (1 - (slP / 100));
+            data.currentSignal.target1 = entryPrice * (1 + (tpP / 100));
           } else {
-            data.currentSignal.stopLoss = curClose * (1 + (slP / 100));
-            data.currentSignal.target1 = curClose * (1 - (tpP / 100));
+            data.currentSignal.stopLoss = entryPrice * (1 + (slP / 100));
+            data.currentSignal.target1 = entryPrice * (1 - (tpP / 100));
           }
           data.currentSignal.target2 = data.currentSignal.target1;
         } else {
           if (intendedDirection === 'LONG') {
             const closestOB = orderBlocks.bullish.filter(ob => ob.unmitigated).pop();
             const sLow = closestOB ? closestOB.low : Math.min(data.candles[data.candles.length - 2].low, data.candles[data.candles.length - 1].low);
-            data.currentSignal.stopLoss = Math.max(sLow, curClose * 0.985);
+            data.currentSignal.stopLoss = Math.max(sLow, entryPrice * 0.985);
             const risk = data.currentSignal.entry - data.currentSignal.stopLoss;
             data.currentSignal.target1 = data.currentSignal.entry + risk * 1.5;
           } else {
             const closestOB = orderBlocks.bearish.filter(ob => ob.unmitigated).pop();
             const sHigh = closestOB ? closestOB.high : Math.max(data.candles[data.candles.length - 2].high, data.candles[data.candles.length - 1].high);
-            data.currentSignal.stopLoss = Math.min(sHigh, curClose * 1.015);
+            data.currentSignal.stopLoss = Math.min(sHigh, entryPrice * 1.015);
             const risk = data.currentSignal.stopLoss - data.currentSignal.entry;
             data.currentSignal.target1 = data.currentSignal.entry - risk * 1.5;
           }

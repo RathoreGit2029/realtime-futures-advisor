@@ -151,7 +151,7 @@ describe('Bayesian Probability Engine', () => {
     const engine = new AntigravityEngine();
     const prob = (engine as any).probEngine;
 
-    const est = prob.getCalibratedBaseConfidence(MarketRegime.TRENDING);
+    const est = prob.getCalibratedBaseConfidence(MarketRegime.COMPRESSION);
     expect(est.pointEstimate).toBe(50);
     expect(est.isReliable).toBe(false);
     expect(est.credibleInterval95[0]).toBeLessThan(50);
@@ -164,9 +164,9 @@ describe('Bayesian Probability Engine', () => {
 
     // 10 wins, 0 losses → alpha=12, beta=2 → mean = 12/14 ≈ 85.7%
     for (let i = 0; i < 10; i++) {
-      prob.recordTradeResult(MarketRegime.TRENDING, true);
+      prob.recordTradeResult(MarketRegime.COMPRESSION, true);
     }
-    const est = prob.getCalibratedBaseConfidence(MarketRegime.TRENDING);
+    const est = prob.getCalibratedBaseConfidence(MarketRegime.COMPRESSION);
     expect(est.pointEstimate).toBeGreaterThan(80);
     expect(est.effectiveSampleSize).toBe(10);
   });
@@ -175,14 +175,14 @@ describe('Bayesian Probability Engine', () => {
     const engine = new AntigravityEngine();
     const prob = (engine as any).probEngine;
 
-    const before = prob.getCalibratedBaseConfidence(MarketRegime.TRENDING);
+    const before = prob.getCalibratedBaseConfidence(MarketRegime.COMPRESSION);
     const widthBefore = before.credibleInterval95[1] - before.credibleInterval95[0];
 
     for (let i = 0; i < 30; i++) {
-      prob.recordTradeResult(MarketRegime.TRENDING, i % 2 === 0);
+      prob.recordTradeResult(MarketRegime.COMPRESSION, i % 2 === 0);
     }
 
-    const after = prob.getCalibratedBaseConfidence(MarketRegime.TRENDING);
+    const after = prob.getCalibratedBaseConfidence(MarketRegime.COMPRESSION);
     const widthAfter = after.credibleInterval95[1] - after.credibleInterval95[0];
 
     expect(widthAfter).toBeLessThan(widthBefore);

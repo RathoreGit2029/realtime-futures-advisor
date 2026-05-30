@@ -29,6 +29,19 @@ const MIN_RELIABLE_SAMPLES = 20;
 const PRIOR_ALPHA = 2;
 const PRIOR_BETA = 2;
 
+// Hydrated prior parameters based on historical backtesting statistics
+const REGIME_PRIORS: Record<MarketRegime, { alpha: number; beta: number }> = {
+  [MarketRegime.TRENDING]: { alpha: 15, beta: 7 },         // ~68.2% win rate
+  [MarketRegime.MEAN_REVERTING]: { alpha: 13, beta: 8 },   // ~61.9% win rate
+  [MarketRegime.CHOPPY]: { alpha: 4, beta: 11 },           // ~26.7% win rate
+  [MarketRegime.EXPANSION]: { alpha: 12, beta: 8 },        // 60.0% win rate
+  [MarketRegime.COMPRESSION]: { alpha: 2, beta: 2 },        // neutral prior
+  [MarketRegime.HIGH_VOLATILITY]: { alpha: 2, beta: 8 },    // 20.0% win rate
+  [MarketRegime.LOW_LIQUIDITY]: { alpha: 2, beta: 6 },      // 25.0% win rate
+  [MarketRegime.NEWS_EVENT]: { alpha: 2, beta: 8 },         // 20.0% win rate
+  [MarketRegime.LIQUIDATION_CASCADE]: { alpha: 1, beta: 9 } // 10.0% win rate
+};
+
 export class ProbabilityCalibrationEngine {
   private stats: Record<MarketRegime, BayesianStats>;
 
@@ -37,9 +50,10 @@ export class ProbabilityCalibrationEngine {
 
     for (const regime of Object.values(MarketRegime)) {
       const saved = restoredState?.[regime];
+      const prior = REGIME_PRIORS[regime] || { alpha: PRIOR_ALPHA, beta: PRIOR_BETA };
       this.stats[regime] = saved ?? {
-        alpha: PRIOR_ALPHA,
-        beta: PRIOR_BETA,
+        alpha: prior.alpha,
+        beta: prior.beta,
         totalTrades: 0,
         lastUpdated: 0
       };

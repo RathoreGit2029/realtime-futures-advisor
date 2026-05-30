@@ -22,6 +22,7 @@ var AntigravityCore = (() => {
   var AntigravityEngine_exports = {};
   __export(AntigravityEngine_exports, {
     AntigravityEngine: () => AntigravityEngine,
+    ExecutionSafetyLayer: () => ExecutionSafetyLayer,
     MarketRegime: () => MarketRegime,
     MarketState: () => MarketState,
     createMarketContext: () => createMarketContext,
@@ -103,6 +104,34 @@ var AntigravityCore = (() => {
       previousEventHash: base.previousEventHash
     };
   }
+
+  // src/execution/SafetyLayer.ts
+  var ExecutionSafetyLayer = class {
+    /**
+     * Validates if a trade is safe to execute and calculates slippage penalties.
+     */
+    validateExecution(ctx, direction, entryPrice) {
+      const { volatility, spread, currentPrice } = ctx;
+      const atrValue = volatility.atr || 0.1;
+      const deviation = Math.abs(currentPrice - entryPrice);
+      const maxDeviation = atrValue * 0.05;
+      if (deviation > maxDeviation) {
+        return {
+          safe: false,
+          adjustedEntryPrice: entryPrice,
+          slippagePenalized: 0,
+          reason: `Stale Tick Gate: Price drifted too far. Deviation=${deviation.toFixed(4)}, Max Allowed=${maxDeviation.toFixed(4)}`
+        };
+      }
+      const slippagePenalized = spread * 1.5;
+      const adjustedEntryPrice = direction === "LONG" ? currentPrice + slippagePenalized : currentPrice - slippagePenalized;
+      return {
+        safe: true,
+        adjustedEntryPrice,
+        slippagePenalized
+      };
+    }
+  };
 
   // src/engine/DeterministicClock.ts
   var SystemClock = class {
@@ -513,15 +542,36 @@ var AntigravityCore = (() => {
   var MIN_RELIABLE_SAMPLES = 20;
   var PRIOR_ALPHA = 2;
   var PRIOR_BETA = 2;
+  var REGIME_PRIORS = {
+    ["TRENDING" /* TRENDING */]: { alpha: 15, beta: 7 },
+    // ~68.2% win rate
+    ["MEAN_REVERTING" /* MEAN_REVERTING */]: { alpha: 13, beta: 8 },
+    // ~61.9% win rate
+    ["CHOPPY" /* CHOPPY */]: { alpha: 4, beta: 11 },
+    // ~26.7% win rate
+    ["EXPANSION" /* EXPANSION */]: { alpha: 12, beta: 8 },
+    // 60.0% win rate
+    ["COMPRESSION" /* COMPRESSION */]: { alpha: 2, beta: 2 },
+    // neutral prior
+    ["HIGH_VOLATILITY" /* HIGH_VOLATILITY */]: { alpha: 2, beta: 8 },
+    // 20.0% win rate
+    ["LOW_LIQUIDITY" /* LOW_LIQUIDITY */]: { alpha: 2, beta: 6 },
+    // 25.0% win rate
+    ["NEWS_EVENT" /* NEWS_EVENT */]: { alpha: 2, beta: 8 },
+    // 20.0% win rate
+    ["LIQUIDATION_CASCADE" /* LIQUIDATION_CASCADE */]: { alpha: 1, beta: 9 }
+    // 10.0% win rate
+  };
   var ProbabilityCalibrationEngine = class {
     stats;
     constructor(restoredState) {
       this.stats = {};
       for (const regime of Object.values(MarketRegime)) {
         const saved = restoredState?.[regime];
+        const prior = REGIME_PRIORS[regime] || { alpha: PRIOR_ALPHA, beta: PRIOR_BETA };
         this.stats[regime] = saved ?? {
-          alpha: PRIOR_ALPHA,
-          beta: PRIOR_BETA,
+          alpha: prior.alpha,
+          beta: prior.beta,
           totalTrades: 0,
           lastUpdated: 0
         };
@@ -856,6 +906,7 @@ var AntigravityCore = (() => {
     constraintEngine = new ConstraintEngine();
     probEngine = new ProbabilityCalibrationEngine();
     circuitBreakers = new CircuitBreakerEngine();
+    safetyLayer = new ExecutionSafetyLayer();
     api = new ExplainabilityAPI();
     constructor() {
       this.constraintEngine.registerConstraint(new RegimeConstraint());

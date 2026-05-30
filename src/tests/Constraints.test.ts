@@ -185,6 +185,85 @@ describe('Constraint DAG Unit Tests', () => {
       expect(stats.totalTrades).toBe(30);
       expect(stats.alpha + stats.beta).toBeGreaterThan(30); // Includes prior
     });
+
+    it('should hydrate with historical regime-specific priors on cold start', () => {
+      const calibrator = new ProbabilityCalibrationEngine();
+      
+      const trendingEstimate = calibrator.getCalibratedBaseConfidence(MarketRegime.TRENDING);
+      // TRENDING prior: alpha = 15, beta = 7 -> mean = 15/22 ≈ 68.2%
+      expect(trendingEstimate.pointEstimate).toBeCloseTo(68.18, 1);
+
+      const choppyEstimate = calibrator.getCalibratedBaseConfidence(MarketRegime.CHOPPY);
+      // CHOPPY prior: alpha = 4, beta = 11 -> mean = 4/15 ≈ 26.7%
+      expect(choppyEstimate.pointEstimate).toBeCloseTo(26.67, 1);
+    });
   });
 
+  describe('ExecutionSafetyLayer', () => {
+    it('should pass validation and calculate correct slippage for a LONG position', () => {
+      const { ExecutionSafetyLayer } = require('../execution/SafetyLayer');
+      const safetyLayer = new ExecutionSafetyLayer();
+      
+      const context = createMarketContext({
+        ...defaultContext,
+        currentPrice: 100,
+        spread: 2,
+        volatility: {
+          atr: 10,
+          isExpanding: false,
+          isCompressing: false,
+          historicalRank: 50
+        }
+      });
+
+      const result = safetyLayer.validateExecution(context, 'LONG', 100);
+      expect(result.safe).toBe(true);
+      // adjustedEntryPrice = currentPrice (100) + 1.5 * spread (2) = 103
+      expect(result.adjustedEntryPrice).toBe(103);
+      expect(result.slippagePenalized).toBe(3);
+    });
+
+    it('should pass validation and calculate correct slippage for a SHORT position', () => {
+      const { ExecutionSafetyLayer } = require('../execution/SafetyLayer');
+      const safetyLayer = new ExecutionSafetyLayer();
+
+      const context = createMarketContext({
+        ...defaultContext,
+        currentPrice: 100,
+        spread: 2,
+        volatility: {
+          atr: 10,
+          isExpanding: false,
+          isCompressing: false,
+          historicalRank: 50
+        }
+      });
+
+      const result = safetyLayer.validateExecution(context, 'SHORT', 100);
+      expect(result.safe).toBe(true);
+      // adjustedEntryPrice = currentPrice (100) - 1.5 * spread (2) = 97
+      expect(result.adjustedEntryPrice).toBe(97);
+      expect(result.slippagePenalized).toBe(3);
+    });
+
+    it('should reject execution if price has drifted more than 5% of ATR (Stale Tick Gate)', () => {
+      const { ExecutionSafetyLayer } = require('../execution/SafetyLayer');
+      const safetyLayer = new ExecutionSafetyLayer();
+
+      const context = createMarketContext({
+        ...defaultContext,
+        currentPrice: 105.1, // Intended entry is 100. ATR is 100. 5% of ATR is 5. Deviation is 5.1 > 5 -> reject.
+        volatility: {
+          atr: 100,
+          isExpanding: false,
+          isCompressing: false,
+          historicalRank: 50
+        }
+      });
+
+      const result = safetyLayer.validateExecution(context, 'LONG', 100);
+      expect(result.safe).toBe(false);
+      expect(result.reason).toContain('Stale Tick Gate');
+    });
+  });
 });
