@@ -34,6 +34,7 @@ export interface ConstraintDecision {
 export class ConstraintEngine {
   private constraints: Constraint[] = [];
   private logger = EventLog.getInstance();
+  private clock = this.logger.getClock();
 
   /**
    * Register a constraint. Constraints are evaluated in registration order.
@@ -50,16 +51,16 @@ export class ConstraintEngine {
    * finalConfidence is the Bayesian point estimate from context — never synthesised here.
    */
   public evaluate(context: MarketContext): ConstraintDecision {
-    const startTime = Date.now();
+    const startTime = this.clock.now();
     const individualEvaluations: ConstraintEvaluation[] = [];
     const failedConstraints: string[] = [];
     const passedConstraints: string[] = [];
     const failureReasons: string[] = [];
 
     for (const constraint of this.constraints) {
-      const evalStart = Date.now();
+      const evalStart = this.clock.now();
       const result = constraint.evaluate(context);
-      const evaluationTime = Date.now() - evalStart;
+      const evaluationTime = this.clock.now() - evalStart;
 
       individualEvaluations.push({
         constraintId: constraint.id,
@@ -81,7 +82,7 @@ export class ConstraintEngine {
           marketContextSnapshot: context
         });
 
-        const totalEvaluationTime = Date.now() - startTime;
+        const totalEvaluationTime = this.clock.now() - startTime;
         return {
           tradeEligible: false,
           failedConstraints,
@@ -103,7 +104,7 @@ export class ConstraintEngine {
       });
     }
 
-    const totalEvaluationTime = Date.now() - startTime;
+    const totalEvaluationTime = this.clock.now() - startTime;
     const finalConfidence = Math.max(0, Math.min(100, context.confidence));
 
     return {

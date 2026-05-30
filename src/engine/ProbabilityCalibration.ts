@@ -1,4 +1,5 @@
 import { MarketRegime } from './Types';
+import { EventLog } from './EventSourcing';
 
 export interface BayesianStats {
   /** Beta distribution alpha (prior wins + observed wins) */
@@ -44,6 +45,7 @@ const REGIME_PRIORS: Record<MarketRegime, { alpha: number; beta: number }> = {
 
 export class ProbabilityCalibrationEngine {
   private stats: Record<MarketRegime, BayesianStats>;
+  private logger = EventLog.getInstance();
 
   constructor(restoredState?: ProbabilityState) {
     this.stats = {} as Record<MarketRegime, BayesianStats>;
@@ -99,7 +101,7 @@ export class ProbabilityCalibrationEngine {
    * Record a trade outcome and update the posterior.
    * pnlPercent is stored for future expectancy weighting but not used yet.
    */
-  public recordTradeResult(regime: MarketRegime, win: boolean, _pnlPercent?: number): void {
+  public recordTradeResult(regime: MarketRegime, win: boolean, pnlPercent?: number): void {
     const s = this.stats[regime];
     if (win) {
       s.alpha += 1;
@@ -107,7 +109,14 @@ export class ProbabilityCalibrationEngine {
       s.beta += 1;
     }
     s.totalTrades += 1;
-    s.lastUpdated = Date.now();
+    s.lastUpdated = this.logger.getClock().now();
+
+    // Log the outcome event for deterministic replay state tracking
+    this.logger.append({
+      type: 'TradeResultRecorded',
+      correlationId: regime,
+      payload: { regime, win, pnlPercent }
+    });
   }
 
   /**

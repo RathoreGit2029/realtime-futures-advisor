@@ -8,7 +8,7 @@ export class ExplainabilityAPI {
    * Explains why a trade was rejected or accepted based on recent events.
    */
   public explainRecentDecisions(symbol: string, timeWindowMs = 60000): any {
-    const startTime = Date.now() - timeWindowMs;
+    const startTime = this.eventLog.getClock().now() - timeWindowMs;
     const recentEvents = this.eventLog.getEvents({ startTs: startTime, correlationId: symbol });
 
     const rejections = recentEvents.filter(e => e.type === 'ConstraintRejected');

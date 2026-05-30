@@ -31,6 +31,9 @@ export interface ReplayState {
 }
 
 export class DeterministicEventLog {
+  private static readonly MAX_MEMORY_EVENTS = 10000;
+  private static readonly KEEP_EVENTS_COUNT = 5000;
+
   private events: SystemEvent[] = [];
   private lastEventHash: string = '';
   private sequenceCounter: number = 0;
@@ -40,6 +43,10 @@ export class DeterministicEventLog {
 
   constructor(clock: Clock) {
     this.clock = clock;
+  }
+
+  public getClock(): Clock {
+    return this.clock;
   }
 
   public registerStateGetter(getter: () => any): void {
@@ -96,8 +103,17 @@ export class DeterministicEventLog {
     if (sequenceNumber > 0 && sequenceNumber % 10000 === 0) {
       this.triggerSnapshotCheckpoint(sequenceNumber);
     }
+
+    // Keep memory usage bounded in SW session runtime
+    this.manageMemoryBounds();
     
     return event;
+  }
+
+  private manageMemoryBounds(): void {
+    if (this.events.length > DeterministicEventLog.MAX_MEMORY_EVENTS) {
+      this.events = this.events.slice(-DeterministicEventLog.KEEP_EVENTS_COUNT);
+    }
   }
 
   private postEventToBackend(event: SystemEvent): void {

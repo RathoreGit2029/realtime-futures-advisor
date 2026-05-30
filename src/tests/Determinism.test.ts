@@ -9,6 +9,7 @@ import { AntigravityEngine } from '../engine/AntigravityEngine';
 import { RawMarketInput, MarketContext, MarketRegime, MarketState } from '../engine/Types';
 import { DeterministicTestClock } from '../engine/DeterministicClock';
 import { EventLog } from '../engine/EventSourcing';
+import { ReplayEngine } from '../engine/ReplayEngine';
 
 // Minimal raw context — matches exactly what background.js passes to evaluateMarket
 const makeRawCtx = (overrides: Partial<RawMarketInput> = {}): RawMarketInput => ({
@@ -230,5 +231,52 @@ describe('Memory Safety', () => {
 
     expect(count).toBeLessThanOrEqual(10000);
     expect(memory).toBeLessThan(10000 * 2048);
+  });
+});
+
+// ─── Replay Parity ──────────────────────────────────────────────────────────
+
+describe('Replay Parity', () => {
+  test('replaying a live recorded log slice yields bit-for-bit parity', () => {
+    const clock = new DeterministicTestClock(1000);
+    EventLog.resetInstance();
+    const eventLog = EventLog.getInstance(clock);
+    const engine = new AntigravityEngine();
+
+    // 1. Simulate 50 market evaluations with various statuses and prices
+    for (let i = 0; i < 50; i++) {
+      clock.advance(1000);
+      const isWindow = (i % 5 === 0) ? MarketState.EXECUTION_WINDOW : MarketState.ACCUMULATION;
+      // Keep volatility rank below 95 to avoid halts, except tick 45 to verify halt replay parity
+      const rank = (i === 45) ? 97 : (50 + (i % 40)); 
+      
+      const ctx = makeRawCtx({
+        timestamp: clock.now(),
+        currentPrice: 50000 + i * 5,
+        marketState: isWindow,
+        volatility: { atr: 100, isExpanding: true, isCompressing: false, historicalRank: rank }
+      });
+      engine.evaluateMarket(ctx);
+
+      // Trigger trade results at specific intervals to update Bayesian states
+      if (i === 10) {
+        engine.probEngine.recordTradeResult(MarketRegime.TRENDING, true);
+      } else if (i === 20) {
+        engine.probEngine.recordTradeResult(MarketRegime.TRENDING, false);
+      } else if (i === 30) {
+        engine.probEngine.recordTradeResult(MarketRegime.COMPRESSION, true);
+      }
+    }
+
+    // Capture the generated event stream
+    const recordedEvents = eventLog.getEvents();
+    expect(recordedEvents.length).toBeGreaterThan(50); // Ticks + outcomes + regime changes
+
+    // 2. Execute replay validation over these events
+    const summary = ReplayEngine.replay(recordedEvents);
+
+    expect(summary.eventsProcessed).toBe(recordedEvents.length);
+    expect(summary.ticksEvaluated).toBe(50);
+    expect(summary.outcomesRecorded).toBe(3);
   });
 });

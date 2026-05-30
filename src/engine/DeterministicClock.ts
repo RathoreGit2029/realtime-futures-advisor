@@ -83,18 +83,18 @@ export class DeterministicTestClock implements Clock {
  */
 export class ReplayClock implements Clock {
   private eventTimes: number[];
-  private currentIndex: number = 0;
+  private currentTime: number;
+  private initialTime: number;
   private sequenceNumber: number = 0;
   
   constructor(eventTimestamps: number[]) {
     this.eventTimes = [...eventTimestamps].sort((a, b) => a - b);
+    this.initialTime = this.eventTimes[0] ?? 0;
+    this.currentTime = this.initialTime;
   }
   
   now(): number {
-    if (this.currentIndex >= this.eventTimes.length) {
-      throw new Error('ReplayClock: No more events in stream');
-    }
-    return this.eventTimes[this.currentIndex];
+    return this.currentTime;
   }
   
   sequence(): number {
@@ -102,17 +102,21 @@ export class ReplayClock implements Clock {
   }
   
   advance(ms: number): void {
-    // In replay mode, we advance to next event time
-    this.currentIndex = Math.min(this.currentIndex + 1, this.eventTimes.length);
+    this.currentTime += ms;
   }
   
   reset(): void {
-    this.currentIndex = 0;
+    this.currentTime = this.initialTime;
     this.sequenceNumber = 0;
   }
   
-  /** Check if more events available */
-  hasMoreEvents(): boolean {
-    return this.currentIndex < this.eventTimes.length;
+  /** Check if more events available based on timestamps */
+  hasMoreEvents(timestamp: number): boolean {
+    return this.eventTimes.some(t => t > timestamp);
+  }
+
+  /** Set time directly to a specific timestamp */
+  setTime(timestamp: number): void {
+    this.currentTime = timestamp;
   }
 }

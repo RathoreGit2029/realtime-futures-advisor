@@ -153,7 +153,9 @@ var AntigravityCore = (() => {
   };
 
   // src/engine/DeterministicEventLog.ts
-  var DeterministicEventLog = class {
+  var DeterministicEventLog = class _DeterministicEventLog {
+    static MAX_MEMORY_EVENTS = 1e4;
+    static KEEP_EVENTS_COUNT = 5e3;
     events = [];
     lastEventHash = "";
     sequenceCounter = 0;
@@ -162,6 +164,9 @@ var AntigravityCore = (() => {
     stateRestorer;
     constructor(clock) {
       this.clock = clock;
+    }
+    getClock() {
+      return this.clock;
     }
     registerStateGetter(getter) {
       this.stateGetter = getter;
@@ -201,7 +206,13 @@ var AntigravityCore = (() => {
       if (sequenceNumber > 0 && sequenceNumber % 1e4 === 0) {
         this.triggerSnapshotCheckpoint(sequenceNumber);
       }
+      this.manageMemoryBounds();
       return event;
+    }
+    manageMemoryBounds() {
+      if (this.events.length > _DeterministicEventLog.MAX_MEMORY_EVENTS) {
+        this.events = this.events.slice(-_DeterministicEventLog.KEEP_EVENTS_COUNT);
+      }
     }
     postEventToBackend(event) {
       if (typeof fetch === "undefined") return;
@@ -426,6 +437,9 @@ var AntigravityCore = (() => {
     getReplayState() {
       return this.eventLog.getReplayState();
     }
+    getClock() {
+      return this.eventLog.getClock();
+    }
     clear() {
       this.eventLog.clear();
     }
@@ -536,6 +550,7 @@ var AntigravityCore = (() => {
   var ConstraintEngine = class {
     constraints = [];
     logger = EventLog.getInstance();
+    clock = this.logger.getClock();
     /**
      * Register a constraint. Constraints are evaluated in registration order.
      * Order is intentional: cheap/broad gates first, expensive/narrow gates last.
@@ -550,15 +565,15 @@ var AntigravityCore = (() => {
      * finalConfidence is the Bayesian point estimate from context — never synthesised here.
      */
     evaluate(context) {
-      const startTime = Date.now();
+      const startTime = this.clock.now();
       const individualEvaluations = [];
       const failedConstraints = [];
       const passedConstraints = [];
       const failureReasons = [];
       for (const constraint of this.constraints) {
-        const evalStart = Date.now();
+        const evalStart = this.clock.now();
         const result = constraint.evaluate(context);
-        const evaluationTime = Date.now() - evalStart;
+        const evaluationTime = this.clock.now() - evalStart;
         individualEvaluations.push({
           constraintId: constraint.id,
           passed: result.passed,
@@ -576,7 +591,7 @@ var AntigravityCore = (() => {
             payload: { constraintId: constraint.id, reason: result.reason },
             marketContextSnapshot: context
           });
-          const totalEvaluationTime2 = Date.now() - startTime;
+          const totalEvaluationTime2 = this.clock.now() - startTime;
           return {
             tradeEligible: false,
             failedConstraints,
@@ -596,7 +611,7 @@ var AntigravityCore = (() => {
           marketContextSnapshot: context
         });
       }
-      const totalEvaluationTime = Date.now() - startTime;
+      const totalEvaluationTime = this.clock.now() - startTime;
       const finalConfidence = Math.max(0, Math.min(100, context.confidence));
       return {
         tradeEligible: true,
@@ -656,6 +671,7 @@ var AntigravityCore = (() => {
   };
   var ProbabilityCalibrationEngine = class {
     stats;
+    logger = EventLog.getInstance();
     constructor(restoredState) {
       this.stats = {};
       for (const regime of Object.values(MarketRegime)) {
@@ -704,7 +720,7 @@ var AntigravityCore = (() => {
      * Record a trade outcome and update the posterior.
      * pnlPercent is stored for future expectancy weighting but not used yet.
      */
-    recordTradeResult(regime, win, _pnlPercent) {
+    recordTradeResult(regime, win, pnlPercent) {
       const s = this.stats[regime];
       if (win) {
         s.alpha += 1;
@@ -712,7 +728,12 @@ var AntigravityCore = (() => {
         s.beta += 1;
       }
       s.totalTrades += 1;
-      s.lastUpdated = Date.now();
+      s.lastUpdated = this.logger.getClock().now();
+      this.logger.append({
+        type: "TradeResultRecorded",
+        correlationId: regime,
+        payload: { regime, win, pnlPercent }
+      });
     }
     /**
      * Serialise the full probability state for persistence in chrome.storage.
@@ -847,7 +868,7 @@ var AntigravityCore = (() => {
      * Explains why a trade was rejected or accepted based on recent events.
      */
     explainRecentDecisions(symbol, timeWindowMs = 6e4) {
-      const startTime = Date.now() - timeWindowMs;
+      const startTime = this.eventLog.getClock().now() - timeWindowMs;
       const recentEvents = this.eventLog.getEvents({ startTs: startTime, correlationId: symbol });
       const rejections = recentEvents.filter((e) => e.type === "ConstraintRejected");
       const stateTransitions = recentEvents.filter((e) => e.type === "StateTransition");
@@ -1032,31 +1053,56 @@ var AntigravityCore = (() => {
         startTs: context.timestamp - 6e4,
         endTs: context.timestamp
       });
-      const health = this.circuitBreakers.evaluateSystemHealth(context, recentEvents);
+      const health = this.circuitBreakers.evaluateSystemHealth(
+        context,
+        recentEvents,
+        this.logger.getClock().now()
+      );
       if (health.halted) {
+        const decision2 = {
+          tradeEligible: false,
+          failedConstraints: ["CircuitBreaker"],
+          passedConstraints: [],
+          failureReasons: [health.reason ?? "System halted"],
+          finalConfidence: 0,
+          individualEvaluations: [],
+          totalEvaluationTime: 0,
+          deterministicHash: ""
+        };
         this.logger.append({
-          type: "CircuitBreakerHalt",
+          type: "MarketEvaluationRecorded",
           correlationId: context.symbol,
-          payload: { reason: health.reason, breakerType: health.breakerType },
+          payload: {
+            decision: decision2,
+            halted: true,
+            haltReason: health.reason
+          },
           marketContextSnapshot: context
         });
         return {
           context,
-          decision: {
-            tradeEligible: false,
-            failedConstraints: ["CircuitBreaker"],
-            passedConstraints: [],
-            failureReasons: [health.reason ?? "System halted"],
-            finalConfidence: 0,
-            individualEvaluations: [],
-            totalEvaluationTime: 0,
-            deterministicHash: ""
-          },
+          decision: decision2,
           halted: true,
           haltReason: health.reason
         };
       }
       const decision = this.constraintEngine.evaluate(context);
+      this.logger.append({
+        type: "MarketEvaluationRecorded",
+        correlationId: context.symbol,
+        payload: {
+          decision: {
+            tradeEligible: decision.tradeEligible,
+            finalConfidence: decision.finalConfidence,
+            failedConstraints: decision.failedConstraints,
+            passedConstraints: decision.passedConstraints,
+            failureReasons: decision.failureReasons,
+            deterministicHash: decision.deterministicHash
+          },
+          halted: false
+        },
+        marketContextSnapshot: context
+      });
       return { context, decision, halted: false };
     }
     /**

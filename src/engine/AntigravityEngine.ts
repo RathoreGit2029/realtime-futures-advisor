@@ -77,27 +77,38 @@ export class AntigravityEngine {
       endTs: context.timestamp
     });
 
-    const health = this.circuitBreakers.evaluateSystemHealth(context, recentEvents);
+    const health = this.circuitBreakers.evaluateSystemHealth(
+      context,
+      recentEvents,
+      this.logger.getClock().now()
+    );
 
     if (health.halted) {
+      const decision = {
+        tradeEligible: false,
+        failedConstraints: ['CircuitBreaker'],
+        passedConstraints: [],
+        failureReasons: [health.reason ?? 'System halted'],
+        finalConfidence: 0,
+        individualEvaluations: [],
+        totalEvaluationTime: 0,
+        deterministicHash: ''
+      };
+
       this.logger.append({
-        type: 'CircuitBreakerHalt',
+        type: 'MarketEvaluationRecorded',
         correlationId: context.symbol,
-        payload: { reason: health.reason, breakerType: health.breakerType },
+        payload: {
+          decision,
+          halted: true,
+          haltReason: health.reason
+        },
         marketContextSnapshot: context
       });
+
       return {
         context,
-        decision: {
-          tradeEligible: false,
-          failedConstraints: ['CircuitBreaker'],
-          passedConstraints: [],
-          failureReasons: [health.reason ?? 'System halted'],
-          finalConfidence: 0,
-          individualEvaluations: [],
-          totalEvaluationTime: 0,
-          deterministicHash: ''
-        },
+        decision,
         halted: true,
         haltReason: health.reason
       };
@@ -105,6 +116,23 @@ export class AntigravityEngine {
 
     // Step 5 — constraint evaluation
     const decision = this.constraintEngine.evaluate(context);
+
+    this.logger.append({
+      type: 'MarketEvaluationRecorded',
+      correlationId: context.symbol,
+      payload: {
+        decision: {
+          tradeEligible: decision.tradeEligible,
+          finalConfidence: decision.finalConfidence,
+          failedConstraints: decision.failedConstraints,
+          passedConstraints: decision.passedConstraints,
+          failureReasons: decision.failureReasons,
+          deterministicHash: decision.deterministicHash
+        },
+        halted: false
+      },
+      marketContextSnapshot: context
+    });
 
     return { context, decision, halted: false };
   }

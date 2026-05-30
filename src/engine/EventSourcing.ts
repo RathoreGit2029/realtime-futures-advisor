@@ -82,6 +82,10 @@ export class EventLog {
     return this.eventLog.getReplayState();
   }
 
+  public getClock(): Clock {
+    return this.eventLog.getClock();
+  }
+
   public clear(): void {
     this.eventLog.clear();
   }
