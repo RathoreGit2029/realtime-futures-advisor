@@ -79,7 +79,8 @@ export class ReplayEngine {
           confidence: event.marketContextSnapshot.confidence,
           currentPrice: event.marketContextSnapshot.currentPrice,
           sequenceNumber: event.marketContextSnapshot.sequenceNumber,
-          regime: event.marketContextSnapshot.regime
+          regime: event.marketContextSnapshot.regime,
+          positionActive: event.marketContextSnapshot.positionActive
         };
 
         // Re-evaluate the tick through the engine path

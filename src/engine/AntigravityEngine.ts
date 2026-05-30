@@ -8,6 +8,7 @@ import { ProbabilityCalibrationEngine } from './ProbabilityCalibration';
 import { CircuitBreakerEngine } from '../risk/CircuitBreakers';
 import { ExplainabilityAPI } from './ExplainabilityAPI';
 import { ExecutionSafetyLayer } from '../execution/SafetyLayer';
+import { StateMachine } from './StateMachine';
 
 import { RegimeConstraint } from '../constraints/RegimeConstraint';
 import { VolatilityConstraint } from '../constraints/VolatilityConstraint';
@@ -29,6 +30,7 @@ export class AntigravityEngine {
   public circuitBreakers = new CircuitBreakerEngine();
   public safetyLayer = new ExecutionSafetyLayer();
   public api = new ExplainabilityAPI();
+  public stateMachine = new StateMachine();
 
   constructor() {
     // Registration order is evaluation order — intentional.
@@ -65,10 +67,23 @@ export class AntigravityEngine {
     const probabilityEstimate = this.probEngine.getCalibratedBaseConfidence(regime);
 
     // Step 3 — build single immutable context with correct regime + confidence
-    const context = createMarketContext({
+    let context = createMarketContext({
       ...rawContext,
       regime,
       confidence: probabilityEstimate.pointEstimate
+    });
+
+    // Step 3.5 — Run State Machine transitions & override state
+    const hasActivePosition = !!rawContext.positionActive;
+    const nextState = this.stateMachine.determineNextState(context, hasActivePosition);
+    this.stateMachine.transitionTo(context.symbol, nextState, `Market evaluation tick for ${context.symbol}`);
+    const validatedState = this.stateMachine.getCurrentState(context.symbol);
+
+    context = createMarketContext({
+      ...rawContext,
+      regime,
+      confidence: probabilityEstimate.pointEstimate,
+      marketState: validatedState
     });
 
     // Step 4 — circuit breakers (use context.timestamp, not Date.now(), for latency check)

@@ -4,10 +4,12 @@ export enum MarketState {
   DISPLACEMENT = 'DISPLACEMENT',
   RETRACEMENT = 'RETRACEMENT',
   EXECUTION_WINDOW = 'EXECUTION_WINDOW',
+  ACTIVE_POSITION = 'ACTIVE_POSITION',
+  EXIT = 'EXIT',
+  NO_TRADE = 'NO_TRADE',
   EXPANSION = 'EXPANSION',
   REVERSAL = 'REVERSAL',
-  CHOPPY = 'CHOPPY',
-  NO_TRADE = 'NO_TRADE'
+  CHOPPY = 'CHOPPY'
 }
 
 export enum MarketRegime {
@@ -67,6 +69,7 @@ export interface MarketContext {
   readonly orderbookDepth?: number;
   readonly confidence: number;
   readonly currentPrice: number;
+  readonly positionActive?: boolean;
   readonly deterministicHash: string;
 }
 
@@ -89,6 +92,7 @@ export interface RawMarketInput {
   confidence: number;
   currentPrice: number;
   sequenceNumber?: number;
+  positionActive?: boolean;
   /** Previous regime — used only for change-detection logging */
   regime?: MarketRegime;
 }
@@ -130,7 +134,8 @@ export function createMarketContext(
     spread: base.spread,
     orderbookDepth: base.orderbookDepth,
     confidence: base.confidence,
-    currentPrice: base.currentPrice
+    currentPrice: base.currentPrice,
+    positionActive: base.positionActive
   });
 
   return {

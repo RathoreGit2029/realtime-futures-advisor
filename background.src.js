@@ -779,7 +779,8 @@ function runCalculations(symbol) {
 
   // Switch advisor mode
   const activeTrade = state.activeTrades[symbol];
-  if (activeTrade && (activeTrade.status === "ACTIVE" || activeTrade.status === "SANDBOX_ACTIVE")) {
+  const positionActive = !!(activeTrade && (activeTrade.status === "ACTIVE" || activeTrade.status === "SANDBOX_ACTIVE"));
+  if (positionActive) {
     data.advisorMode = "MONITORING";
   } else {
     data.advisorMode = "HUNTING";
@@ -851,6 +852,7 @@ function runCalculations(symbol) {
       symbol: symbol,
       // regime is intentionally omitted — the engine classifies it from the other fields
       marketState,
+      positionActive,
       volatility: { atr: curAtr, isExpanding, isCompressing, historicalRank: atrRank },
       liquidityState: {
         hasSweep,

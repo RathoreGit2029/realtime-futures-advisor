@@ -39,10 +39,12 @@ var AntigravityCore = (() => {
     MarketState2["DISPLACEMENT"] = "DISPLACEMENT";
     MarketState2["RETRACEMENT"] = "RETRACEMENT";
     MarketState2["EXECUTION_WINDOW"] = "EXECUTION_WINDOW";
+    MarketState2["ACTIVE_POSITION"] = "ACTIVE_POSITION";
+    MarketState2["EXIT"] = "EXIT";
+    MarketState2["NO_TRADE"] = "NO_TRADE";
     MarketState2["EXPANSION"] = "EXPANSION";
     MarketState2["REVERSAL"] = "REVERSAL";
     MarketState2["CHOPPY"] = "CHOPPY";
-    MarketState2["NO_TRADE"] = "NO_TRADE";
     return MarketState2;
   })(MarketState || {});
   var MarketRegime = /* @__PURE__ */ ((MarketRegime2) => {
@@ -81,7 +83,8 @@ var AntigravityCore = (() => {
       spread: base.spread,
       orderbookDepth: base.orderbookDepth,
       confidence: base.confidence,
-      currentPrice: base.currentPrice
+      currentPrice: base.currentPrice,
+      positionActive: base.positionActive
     });
     return {
       ...base,
@@ -895,6 +898,127 @@ var AntigravityCore = (() => {
     }
   };
 
+  // src/engine/StateMachine.ts
+  var VALID_TRANSITIONS = {
+    ["NO_TRADE" /* NO_TRADE */]: /* @__PURE__ */ new Set([
+      "NO_TRADE" /* NO_TRADE */,
+      "ACCUMULATION" /* ACCUMULATION */,
+      "LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */
+    ]),
+    ["ACCUMULATION" /* ACCUMULATION */]: /* @__PURE__ */ new Set([
+      "NO_TRADE" /* NO_TRADE */,
+      "ACCUMULATION" /* ACCUMULATION */,
+      "LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */,
+      "DISPLACEMENT" /* DISPLACEMENT */
+    ]),
+    ["LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */]: /* @__PURE__ */ new Set([
+      "NO_TRADE" /* NO_TRADE */,
+      "ACCUMULATION" /* ACCUMULATION */,
+      "LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */,
+      "DISPLACEMENT" /* DISPLACEMENT */,
+      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */
+    ]),
+    ["DISPLACEMENT" /* DISPLACEMENT */]: /* @__PURE__ */ new Set([
+      "NO_TRADE" /* NO_TRADE */,
+      "ACCUMULATION" /* ACCUMULATION */,
+      "DISPLACEMENT" /* DISPLACEMENT */,
+      "RETRACEMENT" /* RETRACEMENT */,
+      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */
+    ]),
+    ["RETRACEMENT" /* RETRACEMENT */]: /* @__PURE__ */ new Set([
+      "NO_TRADE" /* NO_TRADE */,
+      "ACCUMULATION" /* ACCUMULATION */,
+      "RETRACEMENT" /* RETRACEMENT */,
+      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */
+    ]),
+    ["EXECUTION_WINDOW" /* EXECUTION_WINDOW */]: /* @__PURE__ */ new Set([
+      "NO_TRADE" /* NO_TRADE */,
+      "ACCUMULATION" /* ACCUMULATION */,
+      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */,
+      "ACTIVE_POSITION" /* ACTIVE_POSITION */
+    ]),
+    ["ACTIVE_POSITION" /* ACTIVE_POSITION */]: /* @__PURE__ */ new Set([
+      "NO_TRADE" /* NO_TRADE */,
+      "ACTIVE_POSITION" /* ACTIVE_POSITION */,
+      "EXIT" /* EXIT */
+    ]),
+    ["EXIT" /* EXIT */]: /* @__PURE__ */ new Set([
+      "NO_TRADE" /* NO_TRADE */,
+      "ACCUMULATION" /* ACCUMULATION */,
+      "EXIT" /* EXIT */
+    ]),
+    // For compatibility with legacy states
+    ["EXPANSION" /* EXPANSION */]: /* @__PURE__ */ new Set(["NO_TRADE" /* NO_TRADE */, "ACCUMULATION" /* ACCUMULATION */]),
+    ["REVERSAL" /* REVERSAL */]: /* @__PURE__ */ new Set(["NO_TRADE" /* NO_TRADE */, "ACCUMULATION" /* ACCUMULATION */]),
+    ["CHOPPY" /* CHOPPY */]: /* @__PURE__ */ new Set(["NO_TRADE" /* NO_TRADE */, "ACCUMULATION" /* ACCUMULATION */])
+  };
+  var StateMachine = class {
+    symbolStates = /* @__PURE__ */ new Map();
+    logger = EventLog.getInstance();
+    getCurrentState(symbol) {
+      return this.symbolStates.get(symbol) ?? "NO_TRADE" /* NO_TRADE */;
+    }
+    determineNextState(context, hasActivePosition) {
+      if (hasActivePosition) {
+        return "ACTIVE_POSITION" /* ACTIVE_POSITION */;
+      }
+      const currentState = this.getCurrentState(context.symbol);
+      if (currentState === "ACTIVE_POSITION" /* ACTIVE_POSITION */ && !hasActivePosition) {
+        return "EXIT" /* EXIT */;
+      }
+      if (currentState === "EXIT" /* EXIT */) {
+        return "NO_TRADE" /* NO_TRADE */;
+      }
+      const isTradeSession = context.sessionState.currentSession === "LONDON" || context.sessionState.currentSession === "NEW_YORK" || context.sessionState.currentSession === "ASIA";
+      if (!isTradeSession) {
+        return "NO_TRADE" /* NO_TRADE */;
+      }
+      if (context.volatility.isCompressing && context.trendState.direction === "SIDEWAYS") {
+        return "ACCUMULATION" /* ACCUMULATION */;
+      }
+      if (context.liquidityState.hasSweep) {
+        return "LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */;
+      }
+      if (context.displacementQuality > 75 && context.trendState.strength > 60) {
+        return "DISPLACEMENT" /* DISPLACEMENT */;
+      }
+      if (context.trendState.direction !== "SIDEWAYS" && context.displacementQuality < 50) {
+        return "RETRACEMENT" /* RETRACEMENT */;
+      }
+      if (context.marketState === "EXECUTION_WINDOW" /* EXECUTION_WINDOW */) {
+        return "EXECUTION_WINDOW" /* EXECUTION_WINDOW */;
+      }
+      return "NO_TRADE" /* NO_TRADE */;
+    }
+    transitionTo(symbol, nextState, reason) {
+      const currentState = this.getCurrentState(symbol);
+      if (currentState === nextState) {
+        return;
+      }
+      const validTransitions = VALID_TRANSITIONS[currentState];
+      if (!validTransitions || !validTransitions.has(nextState)) {
+        throw new Error(
+          `State machine violation: Illegal transition attempt from ${currentState} to ${nextState} for symbol ${symbol}. Reason: ${reason}`
+        );
+      }
+      this.symbolStates.set(symbol, nextState);
+      this.logger.append({
+        type: "StateTransition",
+        correlationId: symbol,
+        payload: {
+          from: currentState,
+          to: nextState,
+          reason
+        }
+      });
+      console.log(`[FSM] ${symbol} transitioned from ${currentState} -> ${nextState}. Reason: ${reason}`);
+    }
+    /** Force reset the state of a symbol (primarily for testing) */
+    forceState(symbol, state) {
+      this.symbolStates.set(symbol, state);
+    }
+  };
+
   // src/constraints/RegimeConstraint.ts
   var RegimeConstraint = class {
     id = "RegimeConstraint";
@@ -1024,6 +1148,7 @@ var AntigravityCore = (() => {
     circuitBreakers = new CircuitBreakerEngine();
     safetyLayer = new ExecutionSafetyLayer();
     api = new ExplainabilityAPI();
+    stateMachine = new StateMachine();
     constructor() {
       this.constraintEngine.registerConstraint(new RegimeConstraint());
       this.constraintEngine.registerConstraint(new VolatilityConstraint());
@@ -1047,10 +1172,20 @@ var AntigravityCore = (() => {
     evaluateMarket(rawContext) {
       const regime = this.regimeEngine.classifyRaw(rawContext);
       const probabilityEstimate = this.probEngine.getCalibratedBaseConfidence(regime);
-      const context = createMarketContext({
+      let context = createMarketContext({
         ...rawContext,
         regime,
         confidence: probabilityEstimate.pointEstimate
+      });
+      const hasActivePosition = !!rawContext.positionActive;
+      const nextState = this.stateMachine.determineNextState(context, hasActivePosition);
+      this.stateMachine.transitionTo(context.symbol, nextState, `Market evaluation tick for ${context.symbol}`);
+      const validatedState = this.stateMachine.getCurrentState(context.symbol);
+      context = createMarketContext({
+        ...rawContext,
+        regime,
+        confidence: probabilityEstimate.pointEstimate,
+        marketState: validatedState
       });
       const recentEvents = this.logger.getEvents({
         startTs: context.timestamp - 6e4,
@@ -1901,7 +2036,8 @@ function runCalculations(symbol) {
 
   // Switch advisor mode
   const activeTrade = state.activeTrades[symbol];
-  if (activeTrade && (activeTrade.status === "ACTIVE" || activeTrade.status === "SANDBOX_ACTIVE")) {
+  const positionActive = !!(activeTrade && (activeTrade.status === "ACTIVE" || activeTrade.status === "SANDBOX_ACTIVE"));
+  if (positionActive) {
     data.advisorMode = "MONITORING";
   } else {
     data.advisorMode = "HUNTING";
@@ -1973,6 +2109,7 @@ function runCalculations(symbol) {
       symbol: symbol,
       // regime is intentionally omitted — the engine classifies it from the other fields
       marketState,
+      positionActive,
       volatility: { atr: curAtr, isExpanding, isCompressing, historicalRank: atrRank },
       liquidityState: {
         hasSweep,
