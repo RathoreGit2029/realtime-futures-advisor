@@ -130,9 +130,10 @@ chrome.storage.local.get(null, (items) => {
   if (items.sandboxWalletBalance !== undefined) state.sandboxWalletBalance = items.sandboxWalletBalance;
 
   // Restore Bayesian probability state so learning survives SW restarts
+  const engine = getOrCreateEngine();
   if (items.probabilityState && typeof AntigravityCore !== 'undefined') {
     try {
-      getOrCreateEngine().probEngine.deserializeState(items.probabilityState);
+      engine.probEngine.deserializeState(items.probabilityState);
       console.log('⚡ Antigravity SW: Bayesian probability state restored from storage.');
     } catch (e) {
       console.warn('⚠️ Antigravity SW: Failed to restore probability state:', e);
