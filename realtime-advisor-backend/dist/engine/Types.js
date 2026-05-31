@@ -67,7 +67,24 @@ function createMarketContext(base) {
         positionActive: base.positionActive,
         portfolioTrades: base.portfolioTrades,
         portfolioWalletBalance: base.portfolioWalletBalance,
-        prospectiveTrade: base.prospectiveTrade
+        prospectiveTrade: base.prospectiveTrade,
+        maxSpreadPct: base.maxSpreadPct,
+        sweepLookback: base.sweepLookback,
+        sweepWickRatio: base.sweepWickRatio,
+        kellyFactor: base.kellyFactor,
+        maxPortfolioHeat: base.maxPortfolioHeat,
+        maxPortfolioMargin: base.maxPortfolioMargin,
+        displacementScore: base.displacementScore,
+        sweptPoolType: base.sweptPoolType,
+        sweptPoolPrice: base.sweptPoolPrice,
+        mssPrice: base.mssPrice,
+        fvgTop: base.fvgTop,
+        fvgBottom: base.fvgBottom,
+        dealingRangeHigh: base.dealingRangeHigh,
+        dealingRangeLow: base.dealingRangeLow,
+        equilibrium: base.equilibrium,
+        primaryTarget: base.primaryTarget,
+        secondaryTarget: base.secondaryTarget
     });
     return {
         ...base,

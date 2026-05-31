@@ -86,7 +86,24 @@ var AntigravityCore = (() => {
       positionActive: base.positionActive,
       portfolioTrades: base.portfolioTrades,
       portfolioWalletBalance: base.portfolioWalletBalance,
-      prospectiveTrade: base.prospectiveTrade
+      prospectiveTrade: base.prospectiveTrade,
+      maxSpreadPct: base.maxSpreadPct,
+      sweepLookback: base.sweepLookback,
+      sweepWickRatio: base.sweepWickRatio,
+      kellyFactor: base.kellyFactor,
+      maxPortfolioHeat: base.maxPortfolioHeat,
+      maxPortfolioMargin: base.maxPortfolioMargin,
+      displacementScore: base.displacementScore,
+      sweptPoolType: base.sweptPoolType,
+      sweptPoolPrice: base.sweptPoolPrice,
+      mssPrice: base.mssPrice,
+      fvgTop: base.fvgTop,
+      fvgBottom: base.fvgBottom,
+      dealingRangeHigh: base.dealingRangeHigh,
+      dealingRangeLow: base.dealingRangeLow,
+      equilibrium: base.equilibrium,
+      primaryTarget: base.primaryTarget,
+      secondaryTarget: base.secondaryTarget
     });
     return {
       ...base,
@@ -1286,7 +1303,8 @@ var AntigravityCore = (() => {
         if (riskPerUnit > 0) {
           R = Math.abs(pt.target1 - entry) / riskPerUnit;
         }
-        const rawKelly = R > 0 ? 0.25 * ((p * R - (1 - p)) / R) : 0.025;
+        const kellyFactor = ctx.kellyFactor ?? 0.25;
+        const rawKelly = R > 0 ? kellyFactor * ((p * R - (1 - p)) / R) : 0.025;
         const clampedKelly = Math.max(0.01, Math.min(0.1, rawKelly));
         const riskAmount = walletBalance * clampedKelly;
         const positionSize = riskPerUnit > 0 ? riskAmount / riskPerUnit : 0;
@@ -1316,11 +1334,12 @@ var AntigravityCore = (() => {
         totalMargin += trade.marginRequired;
       }
       const marginRatio = totalMargin / walletBalance;
-      if (marginRatio > 0.3) {
+      const maxPortfolioMargin = ctx.maxPortfolioMargin ?? 0.3;
+      if (marginRatio > maxPortfolioMargin) {
         return {
           passed: false,
           confidenceImpact: 0,
-          reason: `Aggregate margin exceeds limit: ${(marginRatio * 100).toFixed(2)}% > 30%`
+          reason: `Aggregate margin exceeds limit: ${(marginRatio * 100).toFixed(2)}% > ${(maxPortfolioMargin * 100).toFixed(2)}%`
         };
       }
       let doubleSum = 0;
@@ -1331,18 +1350,19 @@ var AntigravityCore = (() => {
         }
       }
       const portfolioHeat = Math.sqrt(Math.max(0, doubleSum));
-      if (portfolioHeat > 0.15) {
+      const maxPortfolioHeat = ctx.maxPortfolioHeat ?? 0.15;
+      if (portfolioHeat > maxPortfolioHeat) {
         return {
           passed: false,
           confidenceImpact: 0,
-          reason: `Correlation-weighted portfolio heat exceeds limit: ${(portfolioHeat * 100).toFixed(2)}% > 15%`,
+          reason: `Correlation-weighted portfolio heat exceeds limit: ${(portfolioHeat * 100).toFixed(2)}% > ${(maxPortfolioHeat * 100).toFixed(2)}%`,
           metadata: { portfolioHeat }
         };
       }
       return {
         passed: true,
         confidenceImpact: 0,
-        reason: `Portfolio heat is within bounds: ${(portfolioHeat * 100).toFixed(2)}% (limit 15%), margin is ${(marginRatio * 100).toFixed(2)}% (limit 30%).`,
+        reason: `Portfolio heat is within bounds: ${(portfolioHeat * 100).toFixed(2)}% (limit ${(maxPortfolioHeat * 100).toFixed(2)}%), margin is ${(marginRatio * 100).toFixed(2)}% (limit ${(maxPortfolioMargin * 100).toFixed(2)}%).`,
         metadata: { portfolioHeat }
       };
     }

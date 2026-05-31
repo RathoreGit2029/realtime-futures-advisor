@@ -291,6 +291,55 @@
     </div>
   </div>
 
+  <!-- ── Prospective Setup Recommendation Panel (shown when scanning and no active trade) ── -->
+  <div id="recommendationPanelWrap" style="display: none;">
+    <div class="active-trade-panel" id="recommendationPanel" style="border-color: var(--border); background: linear-gradient(135deg, rgba(240,185,11,0.08), rgba(11,14,17,0)); transition: all 0.3s ease;">
+      <div class="atp-header">
+        <span class="atp-badge long" id="recBadge" style="background: rgba(240,185,11,0.15); color: var(--accent); border: 1px solid rgba(240,185,11,0.3);">WAITING</span>
+        <span class="atp-title" id="recSymbol">BTCUSDT</span>
+        <span class="atp-mode" id="recMode">HUNTING</span>
+      </div>
+      <div class="atp-grid">
+        <div class="atp-cell" style="grid-column: span 2;">
+          <div class="atp-label">Pattern</div>
+          <div class="atp-val" id="recPattern" style="font-size: 11px;">Scanning Range</div>
+        </div>
+        <div class="atp-cell">
+          <div class="atp-label">Probability</div>
+          <div class="atp-val" id="recProbability">—</div>
+        </div>
+        <div class="atp-cell">
+          <div class="atp-label">Displacement</div>
+          <div class="atp-val" id="recDisplacement">—</div>
+        </div>
+        <div class="atp-cell">
+          <div class="atp-label">Est. Entry</div>
+          <div class="atp-val" id="recEntry">—</div>
+        </div>
+        <div class="atp-cell">
+          <div class="atp-label">Target (TP1)</div>
+          <div class="atp-val" style="color: var(--green);" id="recTarget">—</div>
+        </div>
+        <div class="atp-cell">
+          <div class="atp-label">Stop Loss</div>
+          <div class="atp-val" style="color: var(--red);" id="recStop">—</div>
+        </div>
+        <div class="atp-cell">
+          <div class="atp-label">Dealing Range</div>
+          <div class="atp-val" id="recDealingRange" style="font-size: 10px;">—</div>
+        </div>
+        <div class="atp-cell" style="grid-column: span 2;">
+          <div class="atp-label">FVG Zone</div>
+          <div class="atp-val" id="recFvg" style="font-size: 10px;">—</div>
+        </div>
+      </div>
+      <div class="pnl-row" style="margin-top: 8px;">
+        <span class="pnl-label" style="font-size: 8px;">Trigger Status</span>
+        <span class="pnl-val" id="recStatus" style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;">Scanning Liquidity...</span>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Performance Journal ── -->
   <div class="section">
     <div class="section-title" id="journalTitle">

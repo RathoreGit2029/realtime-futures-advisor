@@ -1023,6 +1023,41 @@
           <input type="number" id="timeout-candles" min="1" max="100" value="12" style="width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 8px 12px; font-size: 12px; outline: none; margin-top: 4px;">
         </div>
 
+        <!-- Dynamic Risk & Microstructure Parameters -->
+        <div class="config-group" style="border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px;">
+          <label style="font-weight: 700; color: var(--accent);">⚡ Dynamic Scalping Parameters</label>
+        </div>
+
+        <div class="config-group" style="margin-bottom: 12px;">
+          <label for="sweep-lookback">Sweep Lookback Window: <span id="sweep-lookback-val">30</span></label>
+          <input type="range" id="sweep-lookback" min="5" max="100" step="1" value="30">
+        </div>
+
+        <div class="config-group" style="margin-bottom: 12px;">
+          <label for="sweep-wick-ratio">Sweep Wick Ratio: <span id="sweep-wick-val">50%</span></label>
+          <input type="range" id="sweep-wick-ratio" min="10" max="90" step="5" value="50">
+        </div>
+
+        <div class="config-group" style="margin-bottom: 12px;">
+          <label for="max-spread-pct">Max Spread Gate (%): <span id="max-spread-val">0.05%</span></label>
+          <input type="range" id="max-spread-pct" min="0.01" max="1.00" step="0.01" value="0.05">
+        </div>
+
+        <div class="config-group" style="margin-bottom: 12px;">
+          <label for="kelly-factor">Kelly Sizing Factor: <span id="kelly-factor-val">0.25</span></label>
+          <input type="range" id="kelly-factor" min="0.05" max="1.00" step="0.05" value="0.25">
+        </div>
+
+        <div class="config-group" style="margin-bottom: 12px;">
+          <label for="max-portfolio-heat">Max Portfolio Heat: <span id="max-portfolio-heat-val">15%</span></label>
+          <input type="range" id="max-portfolio-heat" min="5" max="50" step="1" value="15">
+        </div>
+
+        <div class="config-group" style="margin-bottom: 12px;">
+          <label for="max-portfolio-margin">Max Portfolio Margin: <span id="max-portfolio-margin-val">30%</span></label>
+          <input type="range" id="max-portfolio-margin" min="5" max="100" step="5" value="30">
+        </div>
+
         <!-- Target Settings -->
         <div class="config-group" style="margin-bottom: 12px; border-top: 1px solid var(--border); padding-top: 12px;">
           <label for="target-mode">Target Mode</label>

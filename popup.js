@@ -302,186 +302,307 @@ function syncJournalWithDatabase() {
     });
 }
 
-function renderActiveTrade(trade) {
+function renderActiveTrade(trade, tabState) {
   const wrap  = document.getElementById('activeTradePanelWrap');
   const panel = document.getElementById('activeTradePanel');
+  const recWrap = document.getElementById('recommendationPanelWrap');
 
-  if (!trade || (trade.status !== 'ACTIVE' && trade.status !== 'SANDBOX_ACTIVE')) {
-    wrap.classList.remove('visible');
-    return;
-  }
+  const isTradeActive = trade && (trade.status === 'ACTIVE' || trade.status === 'SANDBOX_ACTIVE');
 
-  wrap.classList.add('visible');
+  if (isTradeActive) {
+    if (recWrap) recWrap.style.display = 'none';
+    wrap.classList.add('visible');
 
-  const isLong = trade.direction === 'LONG';
+    const isLong = trade.direction === 'LONG';
 
-  // Panel colour
-  panel.className = 'active-trade-panel ' + (isLong ? '' : 'short');
+    // Panel colour
+    panel.className = 'active-trade-panel ' + (isLong ? '' : 'short');
 
-  // Badge / symbol / mode
-  const badge = document.getElementById('atpBadge');
-  badge.textContent  = trade.direction;
-  badge.className    = 'atp-badge ' + (isLong ? 'long' : 'short');
+    // Badge / symbol / mode
+    const badge = document.getElementById('atpBadge');
+    badge.textContent  = trade.direction;
+    badge.className    = 'atp-badge ' + (isLong ? 'long' : 'short');
 
-  document.getElementById('atpSymbol').textContent = trade.symbol  || '—';
-  document.getElementById('atpMode').textContent   = 'MONITORING';
-  const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
-  document.getElementById('atpEntry').textContent  = trade.entry   ? `$${parseFloat(trade.entry).toFixed(pPrec)}`  : '—';
-  document.getElementById('atpTarget').textContent = trade.target1 ? `$${parseFloat(trade.target1).toFixed(pPrec)}` : '—';
-  document.getElementById('atpStop').textContent   = trade.stopLoss? `$${parseFloat(trade.stopLoss).toFixed(pPrec)}`: '—';
+    document.getElementById('atpSymbol').textContent = trade.symbol  || '—';
+    document.getElementById('atpMode').textContent   = 'MONITORING';
+    const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
+    document.getElementById('atpEntry').textContent  = trade.entry   ? `$${parseFloat(trade.entry).toFixed(pPrec)}`  : '—';
+    document.getElementById('atpTarget').textContent = trade.target1 ? `$${parseFloat(trade.target1).toFixed(pPrec)}` : '—';
+    document.getElementById('atpStop').textContent   = trade.stopLoss? `$${parseFloat(trade.stopLoss).toFixed(pPrec)}`: '—';
 
-  chrome.storage.local.get({ enableTimeout: true, timeoutCandles: 12 }, (tItems) => {
-    const limit = tItems.enableTimeout ? tItems.timeoutCandles : 12;
-    document.getElementById('atpAge').textContent = trade.elapsedCandles != null ? `${trade.elapsedCandles}/${limit}` : '—';
-  });
+    chrome.storage.local.get({ enableTimeout: true, timeoutCandles: 12 }, (tItems) => {
+      const limit = tItems.enableTimeout ? tItems.timeoutCandles : 12;
+      document.getElementById('atpAge').textContent = trade.elapsedCandles != null ? `${trade.elapsedCandles}/${limit}` : '—';
+    });
 
-  document.getElementById('atpMarginRatio').textContent = '—';
-  document.getElementById('atpLiqPrice').textContent   = '—';
+    document.getElementById('atpMarginRatio').textContent = '—';
+    document.getElementById('atpLiqPrice').textContent   = '—';
 
-  chrome.storage.local.get(null, (items) => {
-    const isSand = trade.status === 'SANDBOX_ACTIVE' || (trade.status && trade.status.startsWith('SANDBOX_'));
-    const marginMode = items.marginMode || 'ISOLATED';
-    const activeWalletBalance = isSand ? (items.sandboxWalletBalance || 1000) : (items.walletBalance || 1000);
+    chrome.storage.local.get(null, (items) => {
+      const isSand = trade.status === 'SANDBOX_ACTIVE' || (trade.status && trade.status.startsWith('SANDBOX_'));
+      const marginMode = items.marginMode || 'ISOLATED';
+      const activeWalletBalance = isSand ? (items.sandboxWalletBalance || 1000) : (items.walletBalance || 1000);
 
-    const activeTradesList = [];
-    for (const key in items) {
-      if (key.startsWith('activeTrade_')) {
-        const t = items[key];
-        if (t && (t.status === 'ACTIVE' || t.status === 'SANDBOX_ACTIVE')) {
-          const tSand = t.status === 'SANDBOX_ACTIVE' || (t.status && t.status.startsWith('SANDBOX_'));
-          if (tSand === isSand) {
-            activeTradesList.push(t);
+      const activeTradesList = [];
+      for (const key in items) {
+        if (key.startsWith('activeTrade_')) {
+          const t = items[key];
+          if (t && (t.status === 'ACTIVE' || t.status === 'SANDBOX_ACTIVE')) {
+            const tSand = t.status === 'SANDBOX_ACTIVE' || (t.status && t.status.startsWith('SANDBOX_'));
+            if (tSand === isSand) {
+              activeTradesList.push(t);
+            }
           }
         }
       }
-    }
 
-    const priceUrl = `https://fapi.binance.com/fapi/v1/ticker/price`;
-    fetch(priceUrl)
-      .then(r => {
-        if (!r.ok) throw new Error();
-        return r.json();
-      })
-      .catch(() => {
-        const spotUrl = `https://api.binance.com/api/v3/ticker/price`;
-        return fetch(spotUrl).then(r => r.json());
-      })
-      .then(data => {
-        const priceMap = {};
-        data.forEach(item => {
-          priceMap[item.symbol] = parseFloat(item.price);
-        });
-
-        const tick = priceMap[trade.symbol] || parseFloat(trade.entry) || 0;
-        if (tick <= 0 || !trade.entry) {
-          document.getElementById('atpPnl').textContent = 'Waiting for tick...';
-          document.getElementById('atpPnl').style.color = 'var(--text-muted)';
-          return;
-        }
-
-        const leverage = parseFloat(trade.leverage) || 3;
-        const entry = parseFloat(trade.entry) || 0;
-        const posSize = parseFloat(trade.positionSize) || 0;
-        const direction = trade.direction;
-
-        if (entry <= 0 || posSize <= 0 || leverage <= 0 || isNaN(entry) || isNaN(posSize) || isNaN(leverage)) {
-          document.getElementById('atpPnl').textContent = '—';
-          document.getElementById('atpMarginRatio').textContent = '0.00%';
-          document.getElementById('atpLiqPrice').textContent = '—';
-          return;
-        }
-
-        const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
-        document.getElementById('atpMarkPrice').textContent = `$${tick.toFixed(pPrec)}`;
-        document.getElementById('atpSize').textContent = `${posSize} units`;
-
-        const pnlPct = isLong
-          ? ((tick - entry) / entry) * 100 * leverage
-          : ((entry - tick) / entry) * 100 * leverage;
-
-        const sizePct = isLong
-          ? ((tick - entry) / entry) * 100
-          : ((entry - tick) / entry) * 100;
-
-        const pnlDollar = isLong
-          ? (tick - entry) * posSize
-          : (entry - tick) * posSize;
-
-        const sign  = pnlPct >= 0 ? '+' : '';
-        const sizeSign = sizePct >= 0 ? '+' : '';
-        const color = pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
-        document.getElementById('atpPnl').textContent = `${sign}${pnlPct.toFixed(2)}% (ROE)  |  ${sizeSign}${sizePct.toFixed(2)}% (Size)  |  ${sign}$${pnlDollar.toFixed(2)}`;
-        document.getElementById('atpPnl').style.color = color;
-
-        if (marginMode === 'CROSS') {
-          let totalUnrealizedPnl = 0;
-          let totalMM = 0;
-          const uPnLMap = {};
-          const mmMap = {};
-
-          activeTradesList.forEach(t => {
-            const tTick = priceMap[t.symbol] || parseFloat(t.entry) || 0;
-            const tEntry = parseFloat(t.entry) || 0;
-            const tSize = parseFloat(t.positionSize) || 0;
-            const tIsLong = t.direction === 'LONG';
-
-            const uPnL = tIsLong
-              ? (tTick - tEntry) * tSize
-              : (tEntry - tTick) * tSize;
-
-            const mm = tSize * tTick * 0.004;
-
-            totalUnrealizedPnl += uPnL;
-            totalMM += mm;
-            uPnLMap[t.symbol] = uPnL;
-            mmMap[t.symbol] = mm;
+      const priceUrl = `https://fapi.binance.com/fapi/v1/ticker/price`;
+      fetch(priceUrl)
+        .then(r => {
+          if (!r.ok) throw new Error();
+          return r.json();
+        })
+        .catch(() => {
+          const spotUrl = `https://api.binance.com/api/v3/ticker/price`;
+          return fetch(spotUrl).then(r => r.json());
+        })
+        .then(data => {
+          const priceMap = {};
+          data.forEach(item => {
+            priceMap[item.symbol] = parseFloat(item.price);
           });
 
-          const marginBalance = activeWalletBalance + totalUnrealizedPnl;
-          const marginRatio = marginBalance <= 0 ? 100 : Math.min((totalMM / marginBalance) * 100, 100);
+          const tick = priceMap[trade.symbol] || parseFloat(trade.entry) || 0;
+          if (tick <= 0 || !trade.entry) {
+            document.getElementById('atpPnl').textContent = 'Waiting for tick...';
+            document.getElementById('atpPnl').style.color = 'var(--text-muted)';
+            return;
+          }
 
-          const uPnL_i = uPnLMap[trade.symbol] || 0;
-          const MM_i = mmMap[trade.symbol] || 0;
+          const leverage = parseFloat(trade.leverage) || 3;
+          const entry = parseFloat(trade.entry) || 0;
+          const posSize = parseFloat(trade.positionSize) || 0;
+          const direction = trade.direction;
 
-          const otherUnrealizedPnl = totalUnrealizedPnl - uPnL_i;
-          const otherMaintenanceMargin = totalMM - MM_i;
-
-          let liqPrice = 0;
-          if (posSize > 0) {
-            if (isLong) {
-              liqPrice = (entry - (activeWalletBalance + otherUnrealizedPnl - otherMaintenanceMargin) / posSize) / 0.996;
-            } else {
-              liqPrice = (entry + (activeWalletBalance + otherUnrealizedPnl - otherMaintenanceMargin) / posSize) / 1.004;
-            }
+          if (entry <= 0 || posSize <= 0 || leverage <= 0 || isNaN(entry) || isNaN(posSize) || isNaN(leverage)) {
+            document.getElementById('atpPnl').textContent = '—';
+            document.getElementById('atpMarginRatio').textContent = '0.00%';
+            document.getElementById('atpLiqPrice').textContent = '—';
+            return;
           }
 
           const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
-          document.getElementById('atpMarginRatio').textContent = `${marginRatio.toFixed(2)}%`;
-          document.getElementById('atpMarginRatio').style.color = marginRatio > 50 ? 'var(--red)' : marginRatio > 20 ? 'var(--accent)' : 'var(--green)';
-          document.getElementById('atpLiqPrice').textContent = liqPrice > 0 ? `$${liqPrice.toFixed(pPrec)}` : '—';
+          document.getElementById('atpMarkPrice').textContent = `$${tick.toFixed(pPrec)}`;
+          document.getElementById('atpSize').textContent = `${posSize} units`;
+
+          const pnlPct = isLong
+            ? ((tick - entry) / entry) * 100 * leverage
+            : ((entry - tick) / entry) * 100 * leverage;
+
+          const sizePct = isLong
+            ? ((tick - entry) / entry) * 100
+            : ((entry - tick) / entry) * 100;
+
+          const pnlDollar = isLong
+            ? (tick - entry) * posSize
+            : (entry - tick) * posSize;
+
+          const sign  = pnlPct >= 0 ? '+' : '';
+          const sizeSign = sizePct >= 0 ? '+' : '';
+          const color = pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
+          document.getElementById('atpPnl').textContent = `${sign}${pnlPct.toFixed(2)}% (ROE)  |  ${sizeSign}${sizePct.toFixed(2)}% (Size)  |  ${sign}$${pnlDollar.toFixed(2)}`;
+          document.getElementById('atpPnl').style.color = color;
+
+          if (marginMode === 'CROSS') {
+            let totalUnrealizedPnl = 0;
+            let totalMM = 0;
+            const uPnLMap = {};
+            const mmMap = {};
+
+            activeTradesList.forEach(t => {
+              const tTick = priceMap[t.symbol] || parseFloat(t.entry) || 0;
+              const tEntry = parseFloat(t.entry) || 0;
+              const tSize = parseFloat(t.positionSize) || 0;
+              const tIsLong = t.direction === 'LONG';
+
+              const uPnL = tIsLong
+                ? (tTick - tEntry) * tSize
+                : (tEntry - tTick) * tSize;
+
+              const mm = tSize * tTick * 0.004;
+
+              totalUnrealizedPnl += uPnL;
+              totalMM += mm;
+              uPnLMap[t.symbol] = uPnL;
+              mmMap[t.symbol] = mm;
+            });
+
+            const marginBalance = activeWalletBalance + totalUnrealizedPnl;
+            const marginRatio = marginBalance <= 0 ? 100 : Math.min((totalMM / marginBalance) * 100, 100);
+
+            const uPnL_i = uPnLMap[trade.symbol] || 0;
+            const MM_i = mmMap[trade.symbol] || 0;
+
+            const otherUnrealizedPnl = totalUnrealizedPnl - uPnL_i;
+            const otherMaintenanceMargin = totalMM - MM_i;
+
+            let liqPrice = 0;
+            if (posSize > 0) {
+              if (isLong) {
+                liqPrice = (entry - (activeWalletBalance + otherUnrealizedPnl - otherMaintenanceMargin) / posSize) / 0.996;
+              } else {
+                liqPrice = (entry + (activeWalletBalance + otherUnrealizedPnl - otherMaintenanceMargin) / posSize) / 1.004;
+              }
+            }
+
+            const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
+            document.getElementById('atpMarginRatio').textContent = `${marginRatio.toFixed(2)}%`;
+            document.getElementById('atpMarginRatio').style.color = marginRatio > 50 ? 'var(--red)' : marginRatio > 20 ? 'var(--accent)' : 'var(--green)';
+            document.getElementById('atpLiqPrice').textContent = liqPrice > 0 ? `$${liqPrice.toFixed(pPrec)}` : '—';
+          } else {
+            // Isolated margin mode
+            const marginRequired = (posSize * entry) / leverage;
+            const marginBalance = marginRequired + pnlDollar;
+            const maintenanceMargin = posSize * tick * 0.004;
+            const marginRatio = marginBalance <= 0 ? 100 : Math.min((maintenanceMargin / marginBalance) * 100, 100);
+
+            const liqPrice = isLong
+              ? (entry * (1 - 1 / leverage)) / (1 - 0.004)
+              : (entry * (1 + 1 / leverage)) / (1 + 0.004);
+
+            const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
+            document.getElementById('atpMarginRatio').textContent = `${marginRatio.toFixed(2)}%`;
+            document.getElementById('atpMarginRatio').style.color = marginRatio > 50 ? 'var(--red)' : marginRatio > 20 ? 'var(--accent)' : 'var(--green)';
+            document.getElementById('atpLiqPrice').textContent = `$${liqPrice.toFixed(pPrec)}`;
+          }
+        })
+        .catch((err) => {
+          console.error("Popup price fetch error:", err);
+          document.getElementById('atpPnl').textContent = 'Price error';
+          document.getElementById('atpPnl').style.color = 'var(--text-muted)';
+        });
+    });
+  } else {
+    wrap.classList.remove('visible');
+
+    if (recWrap) {
+      if (tabState) {
+        recWrap.style.display = 'block';
+
+        const recBadge = document.getElementById('recBadge');
+        const recPanel = document.getElementById('recommendationPanel');
+        const dir = tabState.direction || "WAITING";
+        
+        recBadge.textContent = dir;
+        
+        if (dir === 'LONG') {
+          recBadge.className = 'atp-badge long';
+          recBadge.style.background = 'rgba(46,189,133,0.2)';
+          recBadge.style.color = 'var(--green)';
+          recBadge.style.borderColor = 'rgba(46,189,133,0.4)';
+          recPanel.style.borderColor = 'rgba(46,189,133,0.35)';
+          recPanel.style.background = 'linear-gradient(135deg, rgba(46,189,133,0.08), rgba(11,14,17,0))';
+        } else if (dir === 'SHORT') {
+          recBadge.className = 'atp-badge short';
+          recBadge.style.background = 'rgba(246,70,93,0.2)';
+          recBadge.style.color = 'var(--red)';
+          recBadge.style.borderColor = 'rgba(246,70,93,0.4)';
+          recPanel.style.borderColor = 'rgba(246,70,93,0.35)';
+          recPanel.style.background = 'linear-gradient(135deg, rgba(246,70,93,0.08), rgba(11,14,17,0))';
         } else {
-          // Isolated margin mode
-          const marginRequired = (posSize * entry) / leverage;
-          const marginBalance = marginRequired + pnlDollar;
-          const maintenanceMargin = posSize * tick * 0.004;
-          const marginRatio = marginBalance <= 0 ? 100 : Math.min((maintenanceMargin / marginBalance) * 100, 100);
-
-          const liqPrice = isLong
-            ? (entry * (1 - 1 / leverage)) / (1 - 0.004)
-            : (entry * (1 + 1 / leverage)) / (1 + 0.004);
-
-          const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
-          document.getElementById('atpMarginRatio').textContent = `${marginRatio.toFixed(2)}%`;
-          document.getElementById('atpMarginRatio').style.color = marginRatio > 50 ? 'var(--red)' : marginRatio > 20 ? 'var(--accent)' : 'var(--green)';
-          document.getElementById('atpLiqPrice').textContent = `$${liqPrice.toFixed(pPrec)}`;
+          recBadge.className = 'atp-badge';
+          recBadge.style.background = 'rgba(240,185,11,0.15)';
+          recBadge.style.color = 'var(--accent)';
+          recBadge.style.borderColor = 'rgba(240,185,11,0.3)';
+          recPanel.style.borderColor = 'var(--border)';
+          recPanel.style.background = 'linear-gradient(135deg, rgba(240,185,11,0.08), rgba(11,14,17,0))';
         }
-      })
-      .catch((err) => {
-        console.error("Popup price fetch error:", err);
-        document.getElementById('atpPnl').textContent = 'Price error';
-        document.getElementById('atpPnl').style.color = 'var(--text-muted)';
-      });
-  });
+
+        const symbolText = tabState.symbol || '—';
+        document.getElementById('recSymbol').textContent = symbolText;
+        document.getElementById('recMode').textContent = dir === 'WAITING' ? 'HUNTING' : 'TRIGGER_ZONE';
+        document.getElementById('recPattern').textContent = tabState.pattern || 'Scanning';
+        document.getElementById('recProbability').textContent = tabState.probability != null ? `${tabState.probability}%` : '—';
+        
+        const dispVal = tabState.displacementScore != null ? tabState.displacementScore : '—';
+        const dispEl = document.getElementById('recDisplacement');
+        dispEl.textContent = dispVal;
+        if (tabState.displacementScore >= 60) {
+          dispEl.style.color = 'var(--green)';
+        } else if (tabState.displacementScore >= 40) {
+          dispEl.style.color = 'var(--accent)';
+        } else {
+          dispEl.style.color = 'var(--red)';
+        }
+
+        const entryVal = tabState.entry || tabState.currentTickPrice || null;
+        document.getElementById('recEntry').textContent = entryVal ? `$${parseFloat(entryVal).toFixed(2)}` : '—';
+        document.getElementById('recTarget').textContent = tabState.primaryTarget || tabState.target1 ? `$${parseFloat(tabState.primaryTarget || tabState.target1).toFixed(2)}` : '—';
+        document.getElementById('recStop').textContent = tabState.stopLoss ? `$${parseFloat(tabState.stopLoss).toFixed(2)}` : '—';
+
+        // Dealing range Zone (Premium/Discount)
+        const drHigh = tabState.dealingRangeHigh;
+        const drLow = tabState.dealingRangeLow;
+        const eq = tabState.equilibrium;
+        const tick = tabState.currentTickPrice || 0;
+        const rangeEl = document.getElementById('recDealingRange');
+        
+        if (drHigh != null && drLow != null && eq != null && tick > 0) {
+          const isPremium = tick > eq;
+          rangeEl.textContent = isPremium ? "Premium Zone" : "Discount Zone";
+          rangeEl.style.color = isPremium ? "var(--red)" : "var(--green)";
+        } else {
+          rangeEl.textContent = "No Dealing Range";
+          rangeEl.style.color = "var(--text-muted)";
+        }
+
+        // FVG Zone boundary
+        const fvgTop = tabState.fvgTop;
+        const fvgBottom = tabState.fvgBottom;
+        const fvgEl = document.getElementById('recFvg');
+        if (fvgTop != null && fvgBottom != null) {
+          fvgEl.textContent = `${parseFloat(fvgBottom).toFixed(2)} - ${parseFloat(fvgTop).toFixed(2)}`;
+          fvgEl.style.color = "var(--green)";
+        } else {
+          fvgEl.textContent = "No Active FVG";
+          fvgEl.style.color = "var(--text-muted)";
+        }
+
+        const statusEl = document.getElementById('recStatus');
+        const reason = tabState.reason || tabState.triggerCatalyst || "Scanning liquidity pools...";
+        statusEl.textContent = reason;
+        statusEl.title = reason;
+        statusEl.style.color = dir === 'WAITING' ? 'var(--text-muted)' : 'var(--accent)';
+      } else {
+        recWrap.style.display = 'block';
+        
+        document.getElementById('recBadge').textContent = 'SCANNING';
+        document.getElementById('recBadge').style.background = 'rgba(132,142,156,0.1)';
+        document.getElementById('recBadge').style.color = 'var(--text-muted)';
+        document.getElementById('recBadge').style.borderColor = 'var(--border)';
+        
+        getActiveTabSymbol((activeSym) => {
+          document.getElementById('recSymbol').textContent = activeSym || '—';
+        });
+        
+        document.getElementById('recMode').textContent = 'CONNECTING';
+        document.getElementById('recPattern').textContent = 'Connecting to chart context...';
+        document.getElementById('recProbability').textContent = '—';
+        document.getElementById('recDisplacement').textContent = '—';
+        document.getElementById('recDisplacement').style.color = 'var(--text-muted)';
+        document.getElementById('recEntry').textContent = '—';
+        document.getElementById('recTarget').textContent = '—';
+        document.getElementById('recStop').textContent = '—';
+        document.getElementById('recDealingRange').textContent = '—';
+        document.getElementById('recDealingRange').style.color = 'var(--text-muted)';
+        document.getElementById('recFvg').textContent = '—';
+        document.getElementById('recFvg').style.color = 'var(--text-muted)';
+        
+        document.getElementById('recStatus').textContent = 'Awaiting WebSocket feed updates...';
+        document.getElementById('recStatus').style.color = 'var(--text-muted)';
+      }
+    }
+  }
 }
 
 function markSynced() {
@@ -521,6 +642,10 @@ function cleanSymbol(raw) {
 // Parses active tab URL/title to detect the symbol
 function getActiveTabSymbol(callback) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (chrome.runtime.lastError || !tabs || tabs.length === 0) {
+      if (callback) callback(null);
+      return;
+    }
     const tab = tabs[0];
     if (!tab || !tab.url) {
       if (callback) callback(null);
@@ -559,13 +684,14 @@ function getActiveTabSymbol(callback) {
 function refreshPopupActiveTrade() {
   getActiveTabSymbol((symbol) => {
     if (!symbol) {
-      renderActiveTrade(null);
+      renderActiveTrade(null, null);
       updatePopupEquity();
       return;
     }
-    chrome.storage.local.get('activeTrade_' + symbol, (res) => {
+    chrome.storage.local.get(['activeTrade_' + symbol, 'tabState_' + symbol], (res) => {
       const trade = res['activeTrade_' + symbol] || null;
-      renderActiveTrade(trade);
+      const tabState = res['tabState_' + symbol] || null;
+      renderActiveTrade(trade, tabState);
       updatePopupEquity();
     });
   });
@@ -762,10 +888,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Check if any activeTrade_<symbol> was updated
+    // Check if any activeTrade_<symbol> or tabState_<symbol> was updated
     let activeTradeChanged = false;
     for (const key in changes) {
-      if (key.startsWith('activeTrade_')) {
+      if (key.startsWith('activeTrade_') || key.startsWith('tabState_')) {
         activeTradeChanged = true;
         break;
       }
@@ -890,6 +1016,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (chrome.runtime.lastError || !tabs || tabs.length === 0) return;
         if (tabs[0]?.id) {
           chrome.tabs.sendMessage(tabs[0].id, { type: 'UPDATE_SETTINGS', settings: newSettings }).catch(() => {});
         }
@@ -915,6 +1042,7 @@ document.addEventListener('DOMContentLoaded', () => {
     openDashboardBtn.addEventListener('click', () => {
       const dashboardUrl = chrome.runtime.getURL('dashboard.html');
       chrome.tabs.query({ url: dashboardUrl }, (tabs) => {
+        if (chrome.runtime.lastError || !tabs) return;
         if (tabs && tabs.length > 0) {
           chrome.tabs.update(tabs[0].id, { active: true });
           chrome.windows.update(tabs[0].windowId, { focused: true });

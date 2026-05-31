@@ -27,7 +27,13 @@ let state = {
     sandboxMode: true,
     alertPhone: "",
     riskAmount: 20,
-    timeoutCandles: 12
+    timeoutCandles: 12,
+    sweepLookback: 30,
+    sweepWickRatio: 0.5,
+    maxSpreadPct: 0.05,
+    kellyFactor: 0.25,
+    maxPortfolioHeat: 0.15,
+    maxPortfolioMargin: 0.30
   },
   consecutiveLosses: 0,
   journalStats: { wins: 0, losses: 0, timeouts: 0 },
@@ -47,7 +53,9 @@ function extractSettings(items) {
     "timeframe", "leverage", "triggerThreshold", "customStopLoss", 
     "customTakeProfit", "targetMode", "customTpSlMode", "enableTechnical", 
     "enableSMC", "enableCircuitBreaker", "enableAudio", "enableAutoPilot", 
-    "sandboxMode", "alertPhone", "riskAmount", "timeoutCandles"
+    "sandboxMode", "alertPhone", "riskAmount", "timeoutCandles",
+    "sweepLookback", "sweepWickRatio", "maxSpreadPct", "kellyFactor",
+    "maxPortfolioHeat", "maxPortfolioMargin"
   ];
   keys.forEach(k => {
     if (items[k] !== undefined) settings[k] = items[k];
@@ -229,6 +237,7 @@ function sendToBackend(payload) {
 // 3. Tab Scanning & Subscription Logic
 function scanActiveTabs() {
   chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError || !tabs) return;
     const currentSymbols = new Set();
     
     for (const tab of tabs) {
@@ -274,7 +283,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
     "timeframe", "leverage", "triggerThreshold", "customStopLoss", 
     "customTakeProfit", "targetMode", "customTpSlMode", "enableTechnical", 
     "enableSMC", "enableCircuitBreaker", "enableAudio", "enableAutoPilot", 
-    "sandboxMode", "alertPhone", "riskAmount", "timeoutCandles"
+    "sandboxMode", "alertPhone", "riskAmount", "timeoutCandles",
+    "sweepLookback", "sweepWickRatio", "maxSpreadPct", "kellyFactor",
+    "maxPortfolioHeat", "maxPortfolioMargin"
   ];
   
   keys.forEach(k => {
@@ -344,6 +355,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // HUD overlays helper dispatch methods
 function dispatchAudioEvent(symbol, payload) {
   chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError || !tabs) return;
     for (const tab of tabs) {
       if (tab.url && tab.url.includes("binance.com") && tab.url.toLowerCase().includes(symbol.toLowerCase())) {
         chrome.tabs.sendMessage(tab.id, { type: "PLAY_AUDIO", payload }).catch(() => {});
@@ -356,6 +368,7 @@ function broadcastHUDUpdate(symbol) {
   const payload = getHUDUpdatePayload(symbol);
   if (!payload) return;
   chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError || !tabs) return;
     for (const tab of tabs) {
       if (tab.url && tab.url.includes("binance.com") && tab.url.toLowerCase().includes(symbol.toLowerCase())) {
         chrome.tabs.sendMessage(tab.id, { type: "HUD_UPDATE", symbol, payload }).catch(() => {});
@@ -374,7 +387,18 @@ function getHUDUpdatePayload(symbol) {
     currentSignal: {
       direction: sData.direction,
       probability: sData.probability,
-      patternName: sData.pattern
+      patternName: sData.pattern,
+      displacementScore: sData.displacementScore,
+      sweptPoolType: sData.sweptPoolType,
+      sweptPoolPrice: sData.sweptPoolPrice,
+      mssPrice: sData.mssPrice,
+      fvgTop: sData.fvgTop,
+      fvgBottom: sData.fvgBottom,
+      dealingRangeHigh: sData.dealingRangeHigh,
+      dealingRangeLow: sData.dealingRangeLow,
+      equilibrium: sData.equilibrium,
+      primaryTarget: sData.primaryTarget,
+      secondaryTarget: sData.secondaryTarget
     },
     activeTrade: state.activeTrades[symbol] || null,
     advisorMode: state.activeTrades[symbol] ? "MONITORING" : "HUNTING",
@@ -383,3 +407,17 @@ function getHUDUpdatePayload(symbol) {
     sandboxJournalStats: state.sandboxJournalStats
   };
 }
+
+chrome.runtime.onInstalled.addListener(() => {
+  console.log("🚀 Antigravity SW Client: Extension installed or reloaded. Refreshing active Binance Futures tabs...");
+  chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError || !tabs) return;
+    for (const tab of tabs) {
+      if (tab.url && tab.url.includes("binance.com") && tab.url.includes("/futures/")) {
+        console.log(`🔄 Auto-reloading Binance futures tab: ${tab.id} to refresh content script`);
+        chrome.tabs.reload(tab.id);
+      }
+    }
+  });
+});
+

@@ -1,7 +1,11 @@
 import { WebSocket } from 'ws';
 import { AntigravityEngine } from './AntigravityEngine.js';
 import { EventLog } from './EventSourcing.js';
-import { calculateEMA, calculateRSI, calculateMACD, calculateATR, detectLiquiditySweep, detectOrderBlocks, detectFVG, Candle } from './Indicators.js';
+import { 
+  calculateEMA, calculateRSI, calculateMACD, calculateATR, detectLiquiditySweep, detectOrderBlocks, detectFVG, Candle,
+  getSwingFractals, updateLiquidityPools, detectLiquiditySweeps, detectMarketStructureShift, calculateDisplacement, updateFVGRegistry, calculateDealingRange,
+  LiquidityPool, FVGRegistryItem, SweepEvent, MSSEvent, DealingRange
+} from './Indicators.js';
 import { CorrelationEngine } from './CorrelationEngine.js';
 import { MarketRegime, MarketState, RawMarketInput, MarketContext } from './Types.js';
 import { db } from '../db/index.js';
@@ -26,6 +30,12 @@ export interface SystemSettings {
   alertPhone: string;
   riskAmount?: number;
   timeoutCandles?: number;
+  sweepLookback?: number;
+  sweepWickRatio?: number;
+  maxSpreadPct?: number;
+  kellyFactor?: number;
+  maxPortfolioHeat?: number;
+  maxPortfolioMargin?: number;
 }
 
 export interface ActiveTrade {
@@ -43,17 +53,28 @@ export interface ActiveTrade {
   riskAmount: number;
   probability: number;
   patternName: string;
-  rsiValue: number | null;
-  ema9: string | null;
-  ema21: string | null;
-  bullishObCount: number | null;
-  bearishObCount: number | null;
+  rsiValue?: number | null;
+  ema9?: string | null;
+  ema21?: string | null;
+  bullishObCount?: number | null;
+  bearishObCount?: number | null;
   status: string;
   actualOutcome: string | null;
   triggerTime: number;
   elapsedCandles: number;
   timeframe: string;
   triggerCatalyst: string;
+  
+  // SMC/ICT fields
+  displacementScore?: number | null;
+  sweptPoolType?: string | null;
+  sweptPoolPrice?: string | null;
+  mssPrice?: string | null;
+  fvgTop?: string | null;
+  fvgBottom?: string | null;
+  dealingRangeHigh?: string | null;
+  dealingRangeLow?: string | null;
+  equilibrium?: string | null;
 }
 
 export interface SymbolState {
@@ -84,6 +105,15 @@ export interface SymbolState {
   ema21_15m: number | null;
   ema21_1h: number | null;
 
+  // SMC/ICT arrays and events
+  dailyCandles: Candle[];
+  liquidityPools: LiquidityPool[];
+  fvgRegistry: FVGRegistryItem[];
+  lastSweep: SweepEvent | null;
+  lastMSS: MSSEvent | null;
+  lastDealingRange: DealingRange | null;
+  lastDisplacementScore?: number | null;
+ 
   // L2 Order Book Stats
   bestBid: number;
   bestAsk: number;
@@ -113,7 +143,13 @@ export class BinanceWebSocketManager {
       sandboxMode: true,
       alertPhone: "",
       riskAmount: 20,
-      timeoutCandles: 12
+      timeoutCandles: 12,
+      sweepLookback: 30,
+      sweepWickRatio: 0.5,
+      maxSpreadPct: 0.05,
+      kellyFactor: 0.25,
+      maxPortfolioHeat: 0.15,
+      maxPortfolioMargin: 0.30
     } as SystemSettings,
     consecutiveLosses: 0,
     journalStats: { wins: 0, losses: 0, timeouts: 0 },
@@ -218,7 +254,15 @@ export class BinanceWebSocketManager {
         deterministicHash: e.deterministic_hash
       }));
 
-      return { events: parsedEvents, snapshotState };
+      // Find absolute maximum sequence number in the SQLite store
+      const maxEvents = this.dbSync.prepare("SELECT MAX(sequence_number) as m FROM events").get() as any;
+      const maxSnapshots = this.dbSync.prepare("SELECT MAX(sequence_number) as m FROM snapshots").get() as any;
+      const maxSeq = Math.max(
+        maxEvents && maxEvents.m !== null ? maxEvents.m : -1,
+        maxSnapshots && maxSnapshots.m !== null ? maxSnapshots.m : -1
+      );
+
+      return { events: parsedEvents, snapshotState, latestSequenceNumber: maxSeq };
     });
 
     // Register state getters and restorers
@@ -390,6 +434,13 @@ export class BinanceWebSocketManager {
       pdl: null,
       ema21_15m: null,
       ema21_1h: null,
+      dailyCandles: [],
+      liquidityPools: [],
+      fvgRegistry: [],
+      lastSweep: null,
+      lastMSS: null,
+      lastDealingRange: null,
+      lastDisplacementScore: null,
       bestBid: 0,
       bestAsk: 0,
       spread: 0,
@@ -637,14 +688,25 @@ export class BinanceWebSocketManager {
 
       // 4. Daily Candles
       const dailyUrl = sData.useSpotAPI
-        ? `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=1d&limit=2`
-        : `https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=1d&limit=2`;
+        ? `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=1d&limit=10`
+        : `https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=1d&limit=10`;
       fetch(dailyUrl)
         .then(r => r.json())
         .then((d: any) => {
           if (Array.isArray(d) && d.length >= 2) {
-            sData.pdh = parseFloat(d[0][2]);
-            sData.pdl = parseFloat(d[0][3]);
+            sData.dailyCandles = d.map(c => ({
+              time: parseInt(c[0]),
+              open: parseFloat(c[1]),
+              high: parseFloat(c[2]),
+              low: parseFloat(c[3]),
+              close: parseFloat(c[4]),
+              volume: parseFloat(c[5])
+            }));
+            const prevDay = sData.dailyCandles[sData.dailyCandles.length - 2];
+            if (prevDay) {
+              sData.pdh = prevDay.high;
+              sData.pdl = prevDay.low;
+            }
           }
         })
         .catch(() => {});
@@ -704,8 +766,8 @@ export class BinanceWebSocketManager {
     const curRsi = rsi[rsi.length - 1];
 
     const orderBlocks = detectOrderBlocks(sData.candles);
-    const fvg = detectFVG(sData.candles);
-    const sweeps = detectLiquiditySweep(sData.candles);
+    const legacyFVG = detectFVG(sData.candles);
+    const legacySweeps = detectLiquiditySweep(sData.candles, this.state.settings.sweepLookback ?? 30, this.state.settings.sweepWickRatio ?? 0.5);
 
     sData.lastIndicatorStates = {
       rsi: Math.round(curRsi),
@@ -715,7 +777,7 @@ export class BinanceWebSocketManager {
       bearishOB: orderBlocks.bearish.filter(ob => ob.unmitigated).length
     };
 
-    // Swtich modes
+    // Switch modes
     const activeTrade = this.state.activeTrades[symbol];
     const positionActive = !!(activeTrade && (activeTrade.status === "ACTIVE" || activeTrade.status === "SANDBOX_ACTIVE"));
     sData.advisorMode = positionActive ? 'MONITORING' : 'HUNTING';
@@ -754,14 +816,102 @@ export class BinanceWebSocketManager {
     const trendDir: 'UP' | 'DOWN' | 'SIDEWAYS' = emaPct < 0.05 ? 'SIDEWAYS' : (curEma9 > curEma21 ? 'UP' : 'DOWN');
     const trendStrength = Math.min(100, Math.round(emaPct * 400));
 
-    const hasSweep = sweeps.bullishSweep || sweeps.bearishSweep;
-    const marketState = sData.advisorMode === "MONITORING"
-      ? MarketState.NO_TRADE
-      : (hasSweep ? MarketState.EXECUTION_WINDOW : MarketState.NO_TRADE);
+    // --- Run SMC/ICT calculations ---
+    let hasSweep = false;
+    let sweepQuality = 0;
+    let recentSweepDirection: 'BULLISH' | 'BEARISH' | null = null;
+    let marketState = MarketState.NO_TRADE;
+    let displacementScore = 0;
+
+    // FVG registry & pools update
+    sData.liquidityPools = updateLiquidityPools(sData.candles, sData.dailyCandles, sData.liquidityPools);
+    sData.fvgRegistry = updateFVGRegistry(sData.candles, sData.fvgRegistry, sData.currentTickPrice);
+
+    // Detect sweeps
+    const sweep = detectLiquiditySweeps(sData.candles, sData.liquidityPools, sData.currentTickPrice);
+    if (sweep) {
+      sData.lastSweep = sweep;
+      sData.lastMSS = null;
+      sData.lastDealingRange = null;
+      sData.lastDisplacementScore = null;
+    }
+
+    // Detect MSS and Displacement
+    if (sData.lastSweep && !sData.lastMSS) {
+      const mss = detectMarketStructureShift(sData.candles, sData.lastSweep);
+      if (mss) {
+        sData.lastMSS = mss;
+        sData.lastDisplacementScore = calculateDisplacement(sData.candles, mss.candleIndex);
+        sData.lastDealingRange = calculateDealingRange(sData.lastSweep.sweepPrice, sData.lastSweep.direction, sData.candles);
+      }
+    }
+
+    let activeFVG: FVGRegistryItem | null = null;
+
+    if (this.state.settings.enableSMC) {
+      if (sData.lastSweep) {
+        hasSweep = true;
+        sweepQuality = this.computeSMCExecutionSweepQuality(sData.candles, sData.lastSweep);
+        recentSweepDirection = sData.lastSweep.direction === 'LONG' ? 'BULLISH' : 'BEARISH';
+      }
+
+      if (sData.lastDisplacementScore !== null && sData.lastDisplacementScore !== undefined) {
+        displacementScore = sData.lastDisplacementScore;
+      }
+
+      // Check for active touch of FVG inside Premium/Discount
+      if (sData.lastSweep && sData.lastMSS && displacementScore >= 60 && sData.lastDealingRange) {
+        const dir = sData.lastSweep.direction;
+        const eq = sData.lastDealingRange.equilibrium;
+        const sweepTime = sData.lastSweep.time;
+
+        const matchingFVGs = sData.fvgRegistry.filter(f => 
+          f.direction === (dir === 'LONG' ? 'BULLISH' : 'BEARISH') && 
+          f.status !== 'MITIGATED' &&
+          f.creationTime >= sweepTime
+        );
+
+        if (matchingFVGs.length > 0) {
+          matchingFVGs.sort((a, b) => b.creationTime - a.creationTime);
+          const fvg = matchingFVGs[0];
+
+          if (dir === 'LONG') {
+            const isTouch = sData.currentTickPrice <= fvg.top && sData.currentTickPrice >= fvg.bottom;
+            const isDiscount = sData.currentTickPrice < eq;
+            if (isTouch && isDiscount) {
+              activeFVG = fvg;
+            }
+          } else {
+            const isTouch = sData.currentTickPrice >= fvg.bottom && sData.currentTickPrice <= fvg.top;
+            const isPremium = sData.currentTickPrice > eq;
+            if (isTouch && isPremium) {
+              activeFVG = fvg;
+            }
+          }
+        }
+      }
+
+      // Determine FSM State
+      marketState = sData.advisorMode === 'MONITORING'
+        ? MarketState.NO_TRADE
+        : (activeFVG ? MarketState.EXECUTION_WINDOW : MarketState.NO_TRADE);
+
+    } else {
+      // Legacy Technical Indicators
+      hasSweep = legacySweeps.bullishSweep || legacySweeps.bearishSweep;
+      sweepQuality = this.computeSweepQuality(sData.candles, legacySweeps);
+      recentSweepDirection = legacySweeps.bullishSweep ? 'BULLISH' : legacySweeps.bearishSweep ? 'BEARISH' : null;
+      marketState = sData.advisorMode === 'MONITORING'
+        ? MarketState.NO_TRADE
+        : (hasSweep ? MarketState.EXECUTION_WINDOW : MarketState.NO_TRADE);
+    }
 
     // Pre-calculate prospective trade parameters if there's no active trade on this symbol
-    const intendedDirection = trendDir === 'UP' ? 'LONG' : (trendDir === 'DOWN' ? 'SHORT' : 'WAITING');
-    let prospectiveTrade = undefined;
+    const intendedDirection = this.state.settings.enableSMC
+      ? (sData.lastSweep && sData.lastMSS && (sData.lastDisplacementScore ?? 0) >= 60 ? sData.lastSweep.direction : 'WAITING')
+      : (trendDir === 'UP' ? 'LONG' : (trendDir === 'DOWN' ? 'SHORT' : 'WAITING'));
+      
+    let prospectiveTrade: RawMarketInput['prospectiveTrade'] = undefined;
 
     if (intendedDirection !== 'WAITING' && !activeTrade) {
       const useCustom = this.state.settings.targetMode === 'CUSTOM';
@@ -781,20 +931,33 @@ export class BinanceWebSocketManager {
           prospectiveTarget1 = curClose * (1 - (tpP / 100));
         }
       } else {
-        if (intendedDirection === 'LONG') {
-          const closestOB = orderBlocks.bullish.filter((ob: any) => ob.unmitigated && ob.low < curClose).pop();
-          prospectiveStopLoss = closestOB ? closestOB.low : curClose - (curAtr * 1.5);
-          prospectiveTarget1 = curClose + (curClose - prospectiveStopLoss) * 1.5;
+        if (this.state.settings.enableSMC && sData.lastSweep && sData.lastDealingRange) {
+          prospectiveStopLoss = sData.lastSweep.sweepPrice;
+          const oppTarget = this.findOpposingTarget(sData.liquidityPools, intendedDirection as 'LONG' | 'SHORT', curClose);
+          prospectiveTarget1 = oppTarget ? oppTarget : (intendedDirection === 'LONG'
+            ? curClose + (curClose - prospectiveStopLoss) * 2.0
+            : curClose - (prospectiveStopLoss - curClose) * 2.0
+          );
         } else {
-          const closestOB = orderBlocks.bearish.filter((ob: any) => ob.unmitigated && ob.high > curClose).pop();
-          prospectiveStopLoss = closestOB ? closestOB.high : curClose + (curAtr * 1.5);
-          prospectiveTarget1 = curClose - (prospectiveStopLoss - curClose) * 1.5;
+          if (intendedDirection === 'LONG') {
+            const closestOB = orderBlocks.bullish.filter((ob: any) => ob.unmitigated && ob.low < curClose).pop();
+            prospectiveStopLoss = closestOB ? closestOB.low : curClose - (curAtr * 1.5);
+            prospectiveTarget1 = curClose + (curClose - prospectiveStopLoss) * 1.5;
+          } else {
+            const closestOB = orderBlocks.bearish.filter((ob: any) => ob.unmitigated && ob.high > curClose).pop();
+            prospectiveStopLoss = closestOB ? closestOB.high : curClose + (curAtr * 1.5);
+            prospectiveTarget1 = curClose - (prospectiveStopLoss - curClose) * 1.5;
+          }
         }
       }
       prospectiveTrade = {
         direction: intendedDirection as 'LONG' | 'SHORT',
         stopLoss: prospectiveStopLoss,
         target1: prospectiveTarget1,
+        target2: this.state.settings.enableSMC ? (intendedDirection === 'LONG'
+          ? curClose + (curClose - prospectiveStopLoss) * 3.0
+          : curClose - (prospectiveStopLoss - curClose) * 3.0
+        ) : prospectiveTarget1,
         leverage: this.state.settings.leverage || 3
       };
     }
@@ -813,8 +976,8 @@ export class BinanceWebSocketManager {
       volatility: { atr: curAtr, isExpanding, isCompressing, historicalRank: atrRank },
       liquidityState: {
         hasSweep,
-        sweepQuality: this.computeSweepQuality(sData.candles, sweeps),
-        recentSweepDirection: sweeps.bullishSweep ? 'BULLISH' : sweeps.bearishSweep ? 'BEARISH' : null
+        sweepQuality,
+        recentSweepDirection
       },
       trendState: { direction: trendDir, strength: trendStrength, htfAlignment: htfAligned },
       sessionState: {
@@ -822,7 +985,7 @@ export class BinanceWebSocketManager {
         isOverlap: isOverlapSession,
         minutesIntoSession: dateObj.getUTCMinutes()
       },
-      displacementQuality: hasSweep ? Math.min(100, this.computeSweepQuality(sData.candles, sweeps)) : 0,
+      displacementQuality: this.state.settings.enableSMC ? displacementScore : (hasSweep ? Math.min(100, sweepQuality) : 0),
       spread: sData.spread > 0 ? sData.spread : Math.max(curClose * 0.0001, curAtr * 0.02),
       orderbookDepth: sData.orderbookDepth,
       orderbookImbalance: sData.orderbookImbalance,
@@ -830,7 +993,26 @@ export class BinanceWebSocketManager {
       currentPrice: curClose,
       portfolioWalletBalance,
       portfolioTrades,
-      prospectiveTrade
+      prospectiveTrade,
+      maxSpreadPct: this.state.settings.maxSpreadPct,
+      sweepLookback: this.state.settings.sweepLookback,
+      sweepWickRatio: this.state.settings.sweepWickRatio,
+      kellyFactor: this.state.settings.kellyFactor,
+      maxPortfolioHeat: this.state.settings.maxPortfolioHeat,
+      maxPortfolioMargin: this.state.settings.maxPortfolioMargin,
+
+      // SMC fields
+      displacementScore: this.state.settings.enableSMC ? displacementScore : undefined,
+      sweptPoolType: this.state.settings.enableSMC && sData.lastSweep ? sData.lastSweep.pool.type : undefined,
+      sweptPoolPrice: this.state.settings.enableSMC && sData.lastSweep ? sData.lastSweep.pool.price : undefined,
+      mssPrice: this.state.settings.enableSMC && sData.lastMSS ? sData.lastMSS.mssPrice : undefined,
+      fvgTop: this.state.settings.enableSMC && activeFVG ? activeFVG.top : undefined,
+      fvgBottom: this.state.settings.enableSMC && activeFVG ? activeFVG.bottom : undefined,
+      dealingRangeHigh: this.state.settings.enableSMC && sData.lastDealingRange ? sData.lastDealingRange.high : undefined,
+      dealingRangeLow: this.state.settings.enableSMC && sData.lastDealingRange ? sData.lastDealingRange.low : undefined,
+      equilibrium: this.state.settings.enableSMC && sData.lastDealingRange ? sData.lastDealingRange.equilibrium : undefined,
+      primaryTarget: this.state.settings.enableSMC && prospectiveTrade ? prospectiveTrade.target1 : undefined,
+      secondaryTarget: this.state.settings.enableSMC && prospectiveTrade ? prospectiveTrade.target2 : undefined
     };
 
     try {
@@ -889,10 +1071,10 @@ export class BinanceWebSocketManager {
       });
 
       if (sData.advisorMode === "MONITORING") {
-        this.runExitCalculations(symbol, curClose, curEma9, curEma21, curRsi, orderBlocks, sweeps);
+        this.runExitCalculations(symbol, curClose, curEma9, curEma21, curRsi, orderBlocks, legacySweeps);
       } else {
         sData.currentSignal = null;
-        this.runAnalyzingCalculations(symbol, curClose, curEma9, curEma21, curRsi, macdData, orderBlocks, fvg, sweeps, evaluation.context);
+        this.runAnalyzingCalculations(symbol, curClose, curEma9, curEma21, curRsi, macdData, orderBlocks, legacyFVG, legacySweeps, evaluation.context);
       }
 
       // Notify subscribed listeners
@@ -914,9 +1096,19 @@ export class BinanceWebSocketManager {
     if (!sData) return;
 
     let activePattern = "Scanning Range";
-    if (sweeps.bullishSweep || sweeps.bearishSweep) activePattern = "Liquidity Sweep Reversal";
-    else if (orderBlocks.bullish.some((ob: any) => curClose >= ob.low && curClose <= ob.high && ob.unmitigated)) activePattern = "Bullish OB Hold";
-    else if (orderBlocks.bearish.some((ob: any) => curClose >= ob.low && curClose <= ob.high && ob.unmitigated)) activePattern = "Bearish OB Hold";
+    if (this.state.settings.enableSMC) {
+      if (ctx.marketState === MarketState.EXECUTION_WINDOW) {
+        activePattern = "SMC FVG Retracement Entry";
+      } else if (sData.lastSweep && sData.lastMSS) {
+        activePattern = "SMC Sweep & MSS Confirmed";
+      } else if (sData.lastSweep) {
+        activePattern = "SMC Sweep Detected";
+      }
+    } else {
+      if (sweeps.bullishSweep || sweeps.bearishSweep) activePattern = "Liquidity Sweep Reversal";
+      else if (orderBlocks.bullish.some((ob: any) => curClose >= ob.low && curClose <= ob.high && ob.unmitigated)) activePattern = "Bullish OB Hold";
+      else if (orderBlocks.bearish.some((ob: any) => curClose >= ob.low && curClose <= ob.high && ob.unmitigated)) activePattern = "Bearish OB Hold";
+    }
 
     const threshold = this.state.settings.triggerThreshold !== undefined ? this.state.settings.triggerThreshold : 78;
     const useCustom = this.state.settings.targetMode === 'CUSTOM';
@@ -938,7 +1130,10 @@ export class BinanceWebSocketManager {
 
     const meetsThreshold = effectiveConfidence >= threshold;
     if (isEligible && meetsThreshold && ctx && ctx.trendState) {
-      const intendedDirection = ctx.trendState.direction === 'UP' ? 'LONG' : (ctx.trendState.direction === 'DOWN' ? 'SHORT' : 'WAITING');
+      const intendedDirection = this.state.settings.enableSMC
+        ? (sData.lastSweep && sData.lastMSS && (sData.lastDisplacementScore ?? 0) >= 60 ? sData.lastSweep.direction : 'WAITING')
+        : (ctx.trendState.direction === 'UP' ? 'LONG' : (ctx.trendState.direction === 'DOWN' ? 'SHORT' : 'WAITING'));
+        
       if (intendedDirection !== 'WAITING') {
         // Run Execution Safety check
         let entryPrice = curClose;
@@ -976,16 +1171,26 @@ export class BinanceWebSocketManager {
           }
           sData.currentSignal.target2 = sData.currentSignal.target1;
         } else {
-          if (intendedDirection === 'LONG') {
-            const closestOB = orderBlocks.bullish.filter((ob: any) => ob.unmitigated && ob.low < entryPrice).pop();
-            sData.currentSignal.stopLoss = closestOB ? closestOB.low : entryPrice - (curAtr(sData.candles) * 1.5);
-            sData.currentSignal.target1 = entryPrice + (entryPrice - sData.currentSignal.stopLoss) * 1.5;
-            sData.currentSignal.target2 = entryPrice + (entryPrice - sData.currentSignal.stopLoss) * 2.5;
+          if (this.state.settings.enableSMC && sData.lastSweep && sData.lastDealingRange) {
+            sData.currentSignal.stopLoss = sData.lastSweep.sweepPrice;
+            const oppTarget = this.findOpposingTarget(sData.liquidityPools, intendedDirection as 'LONG' | 'SHORT', entryPrice);
+            sData.currentSignal.target1 = oppTarget ? oppTarget : (intendedDirection === 'LONG'
+              ? entryPrice + (entryPrice - sData.currentSignal.stopLoss) * 2.0
+              : entryPrice - (sData.currentSignal.stopLoss - entryPrice) * 2.0
+            );
+            sData.currentSignal.target2 = sData.currentSignal.target1;
           } else {
-            const closestOB = orderBlocks.bearish.filter((ob: any) => ob.unmitigated && ob.high > entryPrice).pop();
-            sData.currentSignal.stopLoss = closestOB ? closestOB.high : entryPrice + (curAtr(sData.candles) * 1.5);
-            sData.currentSignal.target1 = entryPrice - (sData.currentSignal.stopLoss - entryPrice) * 1.5;
-            sData.currentSignal.target2 = entryPrice - (sData.currentSignal.stopLoss - entryPrice) * 2.5;
+            if (intendedDirection === 'LONG') {
+              const closestOB = orderBlocks.bullish.filter((ob: any) => ob.unmitigated && ob.low < entryPrice).pop();
+              sData.currentSignal.stopLoss = closestOB ? closestOB.low : entryPrice - (curAtr(sData.candles) * 1.5);
+              sData.currentSignal.target1 = entryPrice + (entryPrice - sData.currentSignal.stopLoss) * 1.5;
+              sData.currentSignal.target2 = entryPrice + (entryPrice - sData.currentSignal.stopLoss) * 2.5;
+            } else {
+              const closestOB = orderBlocks.bearish.filter((ob: any) => ob.unmitigated && ob.high > entryPrice).pop();
+              sData.currentSignal.stopLoss = closestOB ? closestOB.high : entryPrice + (curAtr(sData.candles) * 1.5);
+              sData.currentSignal.target1 = entryPrice - (sData.currentSignal.stopLoss - entryPrice) * 1.5;
+              sData.currentSignal.target2 = entryPrice - (sData.currentSignal.stopLoss - entryPrice) * 2.5;
+            }
           }
         }
 
@@ -1038,17 +1243,21 @@ export class BinanceWebSocketManager {
       riskAmount,
       probability,
       patternName,
-      rsiValue: Math.round(curRsi),
-      ema9: String(curEma9),
-      ema21: String(curEma21),
-      bullishObCount: orderBlocks.bullish.filter((ob: any) => ob.unmitigated).length,
-      bearishObCount: orderBlocks.bearish.filter((ob: any) => ob.unmitigated).length,
       status: this.state.settings.sandboxMode ? "SANDBOX_ACTIVE" : "ACTIVE",
       actualOutcome: this.state.settings.sandboxMode ? "SANDBOX" : null,
       triggerTime: ctx.timestamp,
       elapsedCandles: 0,
       timeframe: this.state.settings.timeframe,
-      triggerCatalyst: signal.triggerCatalyst || ""
+      triggerCatalyst: signal.triggerCatalyst || "",
+      displacementScore: ctx.displacementScore ?? null,
+      sweptPoolType: ctx.sweptPoolType ?? null,
+      sweptPoolPrice: ctx.sweptPoolPrice != null ? String(ctx.sweptPoolPrice) : null,
+      mssPrice: ctx.mssPrice != null ? String(ctx.mssPrice) : null,
+      fvgTop: ctx.fvgTop != null ? String(ctx.fvgTop) : null,
+      fvgBottom: ctx.fvgBottom != null ? String(ctx.fvgBottom) : null,
+      dealingRangeHigh: ctx.dealingRangeHigh != null ? String(ctx.dealingRangeHigh) : null,
+      dealingRangeLow: ctx.dealingRangeLow != null ? String(ctx.dealingRangeLow) : null,
+      equilibrium: ctx.equilibrium != null ? String(ctx.equilibrium) : null
     };
 
     try {
@@ -1058,19 +1267,23 @@ export class BinanceWebSocketManager {
         direction: newTrade.direction,
         entryPrice: String(newTrade.entry),
         stopLoss: String(newTrade.stopLoss),
-        target1: String(newTrade.target1),
-        target2: String(newTrade.target2),
+        primaryTarget: String(newTrade.target1),
+        secondaryTarget: newTrade.target2 != null ? String(newTrade.target2) : null,
         positionSize: String(newTrade.positionSize),
         marginRequired: String(newTrade.marginRequired),
         leverage: Number(newTrade.leverage),
         riskAmount: String(newTrade.riskAmount),
         probability: Number(newTrade.probability),
         patternName: newTrade.patternName,
-        rsiValue: newTrade.rsiValue,
-        ema9: newTrade.ema9,
-        ema21: newTrade.ema21,
-        bullishObCount: newTrade.bullishObCount,
-        bearishObCount: newTrade.bearishObCount,
+        displacementScore: newTrade.displacementScore ?? null,
+        sweptPoolType: newTrade.sweptPoolType ?? null,
+        sweptPoolPrice: newTrade.sweptPoolPrice ?? null,
+        mssPrice: newTrade.mssPrice ?? null,
+        fvgTop: newTrade.fvgTop ?? null,
+        fvgBottom: newTrade.fvgBottom ?? null,
+        dealingRangeHigh: newTrade.dealingRangeHigh ?? null,
+        dealingRangeLow: newTrade.dealingRangeLow ?? null,
+        equilibrium: newTrade.equilibrium ?? null,
         status: newTrade.status,
         hypotheticalOutcome: newTrade.status,
         actualOutcome: newTrade.actualOutcome,
@@ -1119,11 +1332,39 @@ export class BinanceWebSocketManager {
 
     const price = sData.currentTickPrice;
     if (activeTrade.direction === "LONG") {
-      if (price >= activeTrade.target1) this.resolveActiveTrade(symbol, "WIN");
-      else if (price <= activeTrade.stopLoss) this.resolveActiveTrade(symbol, "LOSS");
+      if (price >= activeTrade.target1) {
+        this.resolveActiveTrade(symbol, "WIN");
+        return;
+      } else if (price <= activeTrade.stopLoss) {
+        this.resolveActiveTrade(symbol, "LOSS");
+        return;
+      }
     } else {
-      if (price <= activeTrade.target1) this.resolveActiveTrade(symbol, "WIN");
-      else if (price >= activeTrade.stopLoss) this.resolveActiveTrade(symbol, "LOSS");
+      if (price <= activeTrade.target1) {
+        this.resolveActiveTrade(symbol, "WIN");
+        return;
+      } else if (price >= activeTrade.stopLoss) {
+        this.resolveActiveTrade(symbol, "LOSS");
+        return;
+      }
+    }
+
+    // SMC early exit rules
+    if (this.state.settings.enableSMC) {
+      if (sData.lastSweep && sData.lastSweep.time > activeTrade.triggerTime) {
+        if (sData.lastSweep.direction !== activeTrade.direction) {
+          console.log(`⚠️ SMC EARLY EXIT: Opposing sweep detected for ${symbol} at ${price}. Closing trade...`);
+          this.resolveActiveTrade(symbol, "TIMEOUT");
+          return;
+        }
+      }
+      if (sData.lastMSS && sData.candles[sData.lastMSS.candleIndex].time > activeTrade.triggerTime) {
+        if (sData.lastMSS.direction !== activeTrade.direction) {
+          console.log(`⚠️ SMC EARLY EXIT: Opposing MSS detected for ${symbol} at ${price}. Closing trade...`);
+          this.resolveActiveTrade(symbol, "TIMEOUT");
+          return;
+        }
+      }
     }
   }
 
@@ -1236,6 +1477,9 @@ export class BinanceWebSocketManager {
     const sData = this.symbolData[symbol];
     if (!sData) return null;
     
+    const activeFVGs = sData.fvgRegistry.filter(f => f.mitigationPercent < 100);
+    const activeFVG = activeFVGs.length > 0 ? activeFVGs[activeFVGs.length - 1] : null;
+
     return {
       symbol: symbol,
       direction: sData.currentSignal ? sData.currentSignal.direction : "WAITING",
@@ -1249,6 +1493,23 @@ export class BinanceWebSocketManager {
         bullishOB: sData.lastIndicatorStates.bullishOB,
         bearishOB: sData.lastIndicatorStates.bearishOB
       } : { rsi: 50, ema9: 0, ema21: 0, bullishOB: 0, bearishOB: 0 },
+      displacementScore: sData.lastDisplacementScore || null,
+      sweptPoolType: sData.lastSweep ? sData.lastSweep.pool.type : null,
+      sweptPoolPrice: sData.lastSweep ? sData.lastSweep.sweepPrice : null,
+      mssPrice: sData.lastMSS ? sData.lastMSS.mssPrice : null,
+      fvgTop: activeFVG ? activeFVG.top : null,
+      fvgBottom: activeFVG ? activeFVG.bottom : null,
+      dealingRangeHigh: sData.lastDealingRange ? sData.lastDealingRange.high : null,
+      dealingRangeLow: sData.lastDealingRange ? sData.lastDealingRange.low : null,
+      equilibrium: sData.lastDealingRange ? sData.lastDealingRange.equilibrium : null,
+      entry: sData.currentSignal ? (sData.currentSignal.entry || null) : null,
+      stopLoss: sData.currentSignal ? (sData.currentSignal.stopLoss || null) : null,
+      target1: sData.currentSignal ? (sData.currentSignal.target1 || null) : null,
+      target2: sData.currentSignal ? (sData.currentSignal.target2 || null) : null,
+      primaryTarget: sData.currentSignal ? (sData.currentSignal.target1 || sData.currentSignal.primaryTarget || null) : null,
+      secondaryTarget: sData.currentSignal ? (sData.currentSignal.target2 || sData.currentSignal.secondaryTarget || null) : null,
+      reason: sData.currentSignal ? (sData.currentSignal.reason || null) : null,
+      triggerCatalyst: sData.currentSignal ? (sData.currentSignal.triggerCatalyst || null) : null,
       lastUpdated: Date.now()
     };
   }
@@ -1266,6 +1527,42 @@ export class BinanceWebSocketManager {
     const avgVol = recentVols.reduce((s, v) => s + v, 0) / Math.max(1, recentVols.length);
     if (cc.volume > avgVol * 1.5) quality += 15;
     return Math.min(100, quality);
+  }
+
+  private computeSMCExecutionSweepQuality(candles: Candle[], sweep: SweepEvent | null) {
+    if (!sweep) return 0;
+    let quality = 50;
+    const cc = candles[candles.length - 1];
+    const range = cc.high - cc.low;
+    if (range > 0) {
+      if (sweep.direction === 'LONG' && (cc.close - cc.low) / range > 0.65) quality += 25;
+      if (sweep.direction === 'SHORT' && (cc.high - cc.close) / range > 0.65) quality += 25;
+    }
+    const recentVols = candles.slice(-21, -1).map(c => c.volume);
+    const avgVol = recentVols.reduce((s, v) => s + v, 0) / Math.max(1, recentVols.length);
+    if (cc.volume > avgVol * 1.5) quality += 15;
+    quality += (sweep.pool.strength || 1) * 2;
+    return Math.min(100, quality);
+  }
+
+  private findOpposingTarget(pools: LiquidityPool[], direction: 'LONG' | 'SHORT', currentPrice: number): number | null {
+    const activeOpposing = pools.filter(p => 
+      p.status === 'ACTIVE' && 
+      p.levelType === (direction === 'LONG' ? 'BSL' : 'SSL')
+    );
+    if (activeOpposing.length === 0) return null;
+    
+    if (direction === 'LONG') {
+      const above = activeOpposing.filter(p => p.price > currentPrice);
+      if (above.length === 0) return null;
+      above.sort((a, b) => a.price - b.price);
+      return above[0].price;
+    } else {
+      const below = activeOpposing.filter(p => p.price < currentPrice);
+      if (below.length === 0) return null;
+      below.sort((a, b) => b.price - a.price);
+      return below[0].price;
+    }
   }
 
   private timeframeToMs(timeframe: string): number {

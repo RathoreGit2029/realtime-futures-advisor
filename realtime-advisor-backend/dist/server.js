@@ -197,30 +197,31 @@ fastify.get('/api/advisor/signals', async (_req, reply) => {
 fastify.post('/api/advisor/signals', async (req, reply) => {
     try {
         const s = req.body;
-        const target1 = s.target1 ?? s.entryPrice;
-        const target2 = s.target2 ?? target1;
+        const primaryTarget = s.primaryTarget ?? s.target1 ?? s.entryPrice;
+        const secondaryTarget = s.secondaryTarget ?? s.target2 ?? null;
         try {
             const [signal] = await index_js_1.db.insert(schema_js_1.advisorSignals).values({
                 symbol: s.symbol,
                 direction: s.direction,
                 entryPrice: String(s.entryPrice),
                 stopLoss: String(s.stopLoss),
-                target1: String(target1),
-                target2: String(target2),
+                primaryTarget: String(primaryTarget),
+                secondaryTarget: secondaryTarget != null ? String(secondaryTarget) : null,
                 positionSize: String(s.positionSize),
                 marginRequired: String(s.marginRequired),
                 leverage: Number(s.leverage),
                 riskAmount: String(s.riskAmount),
                 probability: Number(s.probability),
                 patternName: s.patternName,
-                rsiValue: s.rsiValue != null ? Number(s.rsiValue) : null,
-                ema9: s.ema9 != null ? String(s.ema9) : null,
-                ema21: s.ema21 != null ? String(s.ema21) : null,
-                bullishObCount: s.bullishObCount != null ? Number(s.bullishObCount) : null,
-                bearishObCount: s.bearishObCount != null ? Number(s.bearishObCount) : null,
-                confidenceTrend: s.confidenceTrend != null ? Number(s.confidenceTrend) : null,
-                confidenceSmc: s.confidenceSmc != null ? Number(s.confidenceSmc) : null,
-                confidenceMomentum: s.confidenceMomentum != null ? Number(s.confidenceMomentum) : null,
+                displacementScore: s.displacementScore != null ? Number(s.displacementScore) : null,
+                sweptPoolType: s.sweptPoolType || null,
+                sweptPoolPrice: s.sweptPoolPrice != null ? String(s.sweptPoolPrice) : null,
+                mssPrice: s.mssPrice != null ? String(s.mssPrice) : null,
+                fvgTop: s.fvgTop != null ? String(s.fvgTop) : null,
+                fvgBottom: s.fvgBottom != null ? String(s.fvgBottom) : null,
+                dealingRangeHigh: s.dealingRangeHigh != null ? String(s.dealingRangeHigh) : null,
+                dealingRangeLow: s.dealingRangeLow != null ? String(s.dealingRangeLow) : null,
+                equilibrium: s.equilibrium != null ? String(s.equilibrium) : null,
                 status: s.status || 'ACTIVE',
                 hypotheticalOutcome: s.status || 'ACTIVE',
                 actualOutcome: s.actualOutcome || null,

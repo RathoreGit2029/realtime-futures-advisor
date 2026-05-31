@@ -309,20 +309,31 @@
               <span class="agy-ind-val" id="agy-ind-tf">5m</span>
             </div>
             <div class="agy-ind-card">
-              <span class="agy-ind-name">RSI (14)</span>
+              <span class="agy-ind-name">Displacement</span>
               <span class="agy-ind-val">
-                <span class="agy-dot" id="agy-dot-rsi" style="color: #848e9c;"></span>
-                <span id="agy-val-rsi">--</span>
+                <span class="agy-dot" id="agy-dot-disp" style="color: #848e9c;"></span>
+                <span id="agy-val-disp">--</span>
               </span>
             </div>
             <div class="agy-ind-card">
-              <span class="agy-ind-name">EMA Conf</span>
+              <span class="agy-ind-name">FVG Mitigation</span>
               <span class="agy-ind-val">
-                <span class="agy-dot" id="agy-dot-ema" style="color: #848e9c;"></span>
-                <span id="agy-val-ema">--</span>
+                <span class="agy-dot" id="agy-dot-fvg" style="color: #848e9c;"></span>
+                <span id="agy-val-fvg">--</span>
               </span>
             </div>
             <div class="agy-ind-card">
+              <span class="agy-ind-name">Dealing Range</span>
+              <span class="agy-ind-val">
+                <span class="agy-dot" id="agy-dot-range" style="color: #848e9c;"></span>
+                <span id="agy-val-range">--</span>
+              </span>
+            </div>
+            <div class="agy-ind-card" style="grid-column: span 2;">
+              <span class="agy-ind-name">Swept Pool</span>
+              <span class="agy-ind-val" id="agy-val-sweep" style="color: #fff; font-size: 10px !important;">--</span>
+            </div>
+            <div class="agy-ind-card" style="grid-column: span 2;">
               <span class="agy-ind-name" id="agy-ledger-title">Postgres Ledger</span>
               <span class="agy-ind-val" style="color: #fff; font-family: monospace;">
                 <span id="agy-val-wins" style="color: #2ebd85;">0</span>/
@@ -572,21 +583,60 @@
       }
     }
 
-    // Update Indicators text values
-    const rsiValEl = document.getElementById("agy-val-rsi");
-    const rsiDotEl = document.getElementById("agy-dot-rsi");
-    const emaValEl = document.getElementById("agy-val-ema");
-    const emaDotEl = document.getElementById("agy-dot-ema");
+    // Update SMC Indicators text values
+    const dispValEl = document.getElementById("agy-val-disp");
+    const dispDotEl = document.getElementById("agy-dot-disp");
+    const fvgValEl = document.getElementById("agy-val-fvg");
+    const fvgDotEl = document.getElementById("agy-dot-fvg");
+    const rangeValEl = document.getElementById("agy-val-range");
+    const rangeDotEl = document.getElementById("agy-dot-range");
+    const sweepValEl = document.getElementById("agy-val-sweep");
 
-    if (rsiValEl && rsiDotEl) {
-      rsiValEl.textContent = indicators.rsi;
-      rsiDotEl.style.color = indicators.rsi < 32 ? "#2ebd85" : indicators.rsi > 68 ? "#f6465d" : "#f0b90b";
+    if (dispValEl && dispDotEl) {
+      const dispScore = currentSignal.displacementScore;
+      if (dispScore != null) {
+        dispValEl.textContent = `${dispScore}`;
+        dispDotEl.style.color = dispScore >= 60 ? "#2ebd85" : dispScore >= 40 ? "#f0b90b" : "#f6465d";
+      } else {
+        dispValEl.textContent = "--";
+        dispDotEl.style.color = "#848e9c";
+      }
     }
 
-    if (emaValEl && emaDotEl) {
-      const isBull = currentTickPrice > indicators.ema21;
-      emaValEl.textContent = isBull ? "BULL" : "BEAR";
-      emaDotEl.style.color = isBull ? "#2ebd85" : "#f6465d";
+    if (fvgValEl && fvgDotEl) {
+      const top = currentSignal.fvgTop;
+      const bottom = currentSignal.fvgBottom;
+      if (top != null && bottom != null) {
+        fvgValEl.textContent = `${formatPrice(bottom)}-${formatPrice(top)}`;
+        fvgDotEl.style.color = "#2ebd85";
+      } else {
+        fvgValEl.textContent = "No active FVG";
+        fvgDotEl.style.color = "#848e9c";
+      }
+    }
+
+    if (rangeValEl && rangeDotEl) {
+      const drHigh = currentSignal.dealingRangeHigh;
+      const drLow = currentSignal.dealingRangeLow;
+      const eq = currentSignal.equilibrium;
+      if (drHigh != null && drLow != null && eq != null) {
+        const isPremium = currentTickPrice > eq;
+        rangeValEl.textContent = isPremium ? "Premium Zone" : "Discount Zone";
+        rangeDotEl.style.color = isPremium ? "#f6465d" : "#2ebd85";
+      } else {
+        rangeValEl.textContent = "No Dealing Range";
+        rangeDotEl.style.color = "#848e9c";
+      }
+    }
+
+    if (sweepValEl) {
+      const poolType = currentSignal.sweptPoolType;
+      const poolPrice = currentSignal.sweptPoolPrice;
+      if (poolType && poolPrice) {
+        sweepValEl.textContent = `${poolType} swept at $${formatPrice(poolPrice)}`;
+      } else {
+        sweepValEl.textContent = "Scanning Liquidity Pools...";
+      }
     }
 
     // Update Journal Ledger

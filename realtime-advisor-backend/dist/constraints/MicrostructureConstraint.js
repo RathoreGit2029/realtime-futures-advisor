@@ -14,13 +14,14 @@ class MicrostructureConstraint {
                 reason: 'Microstructure bypass: not in execution window.'
             };
         }
-        // 1. Spread tightness check (spread must be < 0.05% of the current price)
-        const maxSpread = currentPrice * 0.0005;
+        // 1. Spread tightness check (spread must be < maxSpreadPct of the current price)
+        const maxSpreadPct = ctx.maxSpreadPct ?? 0.05;
+        const maxSpread = currentPrice * (maxSpreadPct / 100);
         if (spread > maxSpread) {
             return {
                 passed: false,
                 confidenceImpact: 0,
-                reason: `Spread expansion detected: spread is ${spread.toFixed(4)} (> 0.05% of price: ${maxSpread.toFixed(4)}).`
+                reason: `Spread expansion detected: spread is ${spread.toFixed(4)} (> ${maxSpreadPct}% of price: ${maxSpread.toFixed(4)}).`
             };
         }
         // 2. Order book depth check

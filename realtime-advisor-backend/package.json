@@ -1,6 +1,6 @@
 {
   "name": "realtime-advisor-backend",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "API and Postgres ledger for the Binance Futures Real-Time Advisor Chrome extension",
   "main": "dist/server.js",
   "scripts": {

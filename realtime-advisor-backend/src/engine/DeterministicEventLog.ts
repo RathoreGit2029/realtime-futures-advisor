@@ -214,6 +214,9 @@ export class DeterministicEventLog {
             const lastEvent = this.events[this.events.length - 1];
             this.sequenceCounter = lastEvent.sequenceNumber + 1;
             this.lastEventHash = lastEvent.deterministicHash;
+          } else if ((res as any).latestSequenceNumber !== undefined && (res as any).latestSequenceNumber >= 0) {
+            this.events = [];
+            this.sequenceCounter = (res as any).latestSequenceNumber + 1;
           }
         }
         console.log(`[Event Store] Direct hydration complete. sequenceCounter=${this.sequenceCounter}`);

@@ -89,7 +89,24 @@ var AntigravityCore = (() => {
       positionActive: base.positionActive,
       portfolioTrades: base.portfolioTrades,
       portfolioWalletBalance: base.portfolioWalletBalance,
-      prospectiveTrade: base.prospectiveTrade
+      prospectiveTrade: base.prospectiveTrade,
+      maxSpreadPct: base.maxSpreadPct,
+      sweepLookback: base.sweepLookback,
+      sweepWickRatio: base.sweepWickRatio,
+      kellyFactor: base.kellyFactor,
+      maxPortfolioHeat: base.maxPortfolioHeat,
+      maxPortfolioMargin: base.maxPortfolioMargin,
+      displacementScore: base.displacementScore,
+      sweptPoolType: base.sweptPoolType,
+      sweptPoolPrice: base.sweptPoolPrice,
+      mssPrice: base.mssPrice,
+      fvgTop: base.fvgTop,
+      fvgBottom: base.fvgBottom,
+      dealingRangeHigh: base.dealingRangeHigh,
+      dealingRangeLow: base.dealingRangeLow,
+      equilibrium: base.equilibrium,
+      primaryTarget: base.primaryTarget,
+      secondaryTarget: base.secondaryTarget
     });
     return {
       ...base,
@@ -1289,7 +1306,8 @@ var AntigravityCore = (() => {
         if (riskPerUnit > 0) {
           R = Math.abs(pt.target1 - entry) / riskPerUnit;
         }
-        const rawKelly = R > 0 ? 0.25 * ((p * R - (1 - p)) / R) : 0.025;
+        const kellyFactor = ctx.kellyFactor ?? 0.25;
+        const rawKelly = R > 0 ? kellyFactor * ((p * R - (1 - p)) / R) : 0.025;
         const clampedKelly = Math.max(0.01, Math.min(0.1, rawKelly));
         const riskAmount = walletBalance * clampedKelly;
         const positionSize = riskPerUnit > 0 ? riskAmount / riskPerUnit : 0;
@@ -1319,11 +1337,12 @@ var AntigravityCore = (() => {
         totalMargin += trade.marginRequired;
       }
       const marginRatio = totalMargin / walletBalance;
-      if (marginRatio > 0.3) {
+      const maxPortfolioMargin = ctx.maxPortfolioMargin ?? 0.3;
+      if (marginRatio > maxPortfolioMargin) {
         return {
           passed: false,
           confidenceImpact: 0,
-          reason: `Aggregate margin exceeds limit: ${(marginRatio * 100).toFixed(2)}% > 30%`
+          reason: `Aggregate margin exceeds limit: ${(marginRatio * 100).toFixed(2)}% > ${(maxPortfolioMargin * 100).toFixed(2)}%`
         };
       }
       let doubleSum = 0;
@@ -1334,18 +1353,19 @@ var AntigravityCore = (() => {
         }
       }
       const portfolioHeat = Math.sqrt(Math.max(0, doubleSum));
-      if (portfolioHeat > 0.15) {
+      const maxPortfolioHeat = ctx.maxPortfolioHeat ?? 0.15;
+      if (portfolioHeat > maxPortfolioHeat) {
         return {
           passed: false,
           confidenceImpact: 0,
-          reason: `Correlation-weighted portfolio heat exceeds limit: ${(portfolioHeat * 100).toFixed(2)}% > 15%`,
+          reason: `Correlation-weighted portfolio heat exceeds limit: ${(portfolioHeat * 100).toFixed(2)}% > ${(maxPortfolioHeat * 100).toFixed(2)}%`,
           metadata: { portfolioHeat }
         };
       }
       return {
         passed: true,
         confidenceImpact: 0,
-        reason: `Portfolio heat is within bounds: ${(portfolioHeat * 100).toFixed(2)}% (limit 15%), margin is ${(marginRatio * 100).toFixed(2)}% (limit 30%).`,
+        reason: `Portfolio heat is within bounds: ${(portfolioHeat * 100).toFixed(2)}% (limit ${(maxPortfolioHeat * 100).toFixed(2)}%), margin is ${(marginRatio * 100).toFixed(2)}% (limit ${(maxPortfolioMargin * 100).toFixed(2)}%).`,
         metadata: { portfolioHeat }
       };
     }
@@ -1503,7 +1523,13 @@ let state = {
     sandboxMode: true,
     alertPhone: "",
     riskAmount: 20,
-    timeoutCandles: 12
+    timeoutCandles: 12,
+    sweepLookback: 30,
+    sweepWickRatio: 0.5,
+    maxSpreadPct: 0.05,
+    kellyFactor: 0.25,
+    maxPortfolioHeat: 0.15,
+    maxPortfolioMargin: 0.30
   },
   consecutiveLosses: 0,
   journalStats: { wins: 0, losses: 0, timeouts: 0 },
@@ -1523,7 +1549,9 @@ function extractSettings(items) {
     "timeframe", "leverage", "triggerThreshold", "customStopLoss", 
     "customTakeProfit", "targetMode", "customTpSlMode", "enableTechnical", 
     "enableSMC", "enableCircuitBreaker", "enableAudio", "enableAutoPilot", 
-    "sandboxMode", "alertPhone", "riskAmount", "timeoutCandles"
+    "sandboxMode", "alertPhone", "riskAmount", "timeoutCandles",
+    "sweepLookback", "sweepWickRatio", "maxSpreadPct", "kellyFactor",
+    "maxPortfolioHeat", "maxPortfolioMargin"
   ];
   keys.forEach(k => {
     if (items[k] !== undefined) settings[k] = items[k];
@@ -1705,6 +1733,7 @@ function sendToBackend(payload) {
 // 3. Tab Scanning & Subscription Logic
 function scanActiveTabs() {
   chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError || !tabs) return;
     const currentSymbols = new Set();
     
     for (const tab of tabs) {
@@ -1750,7 +1779,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
     "timeframe", "leverage", "triggerThreshold", "customStopLoss", 
     "customTakeProfit", "targetMode", "customTpSlMode", "enableTechnical", 
     "enableSMC", "enableCircuitBreaker", "enableAudio", "enableAutoPilot", 
-    "sandboxMode", "alertPhone", "riskAmount", "timeoutCandles"
+    "sandboxMode", "alertPhone", "riskAmount", "timeoutCandles",
+    "sweepLookback", "sweepWickRatio", "maxSpreadPct", "kellyFactor",
+    "maxPortfolioHeat", "maxPortfolioMargin"
   ];
   
   keys.forEach(k => {
@@ -1820,6 +1851,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // HUD overlays helper dispatch methods
 function dispatchAudioEvent(symbol, payload) {
   chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError || !tabs) return;
     for (const tab of tabs) {
       if (tab.url && tab.url.includes("binance.com") && tab.url.toLowerCase().includes(symbol.toLowerCase())) {
         chrome.tabs.sendMessage(tab.id, { type: "PLAY_AUDIO", payload }).catch(() => {});
@@ -1832,6 +1864,7 @@ function broadcastHUDUpdate(symbol) {
   const payload = getHUDUpdatePayload(symbol);
   if (!payload) return;
   chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError || !tabs) return;
     for (const tab of tabs) {
       if (tab.url && tab.url.includes("binance.com") && tab.url.toLowerCase().includes(symbol.toLowerCase())) {
         chrome.tabs.sendMessage(tab.id, { type: "HUD_UPDATE", symbol, payload }).catch(() => {});
@@ -1850,7 +1883,18 @@ function getHUDUpdatePayload(symbol) {
     currentSignal: {
       direction: sData.direction,
       probability: sData.probability,
-      patternName: sData.pattern
+      patternName: sData.pattern,
+      displacementScore: sData.displacementScore,
+      sweptPoolType: sData.sweptPoolType,
+      sweptPoolPrice: sData.sweptPoolPrice,
+      mssPrice: sData.mssPrice,
+      fvgTop: sData.fvgTop,
+      fvgBottom: sData.fvgBottom,
+      dealingRangeHigh: sData.dealingRangeHigh,
+      dealingRangeLow: sData.dealingRangeLow,
+      equilibrium: sData.equilibrium,
+      primaryTarget: sData.primaryTarget,
+      secondaryTarget: sData.secondaryTarget
     },
     activeTrade: state.activeTrades[symbol] || null,
     advisorMode: state.activeTrades[symbol] ? "MONITORING" : "HUNTING",
@@ -1859,3 +1903,17 @@ function getHUDUpdatePayload(symbol) {
     sandboxJournalStats: state.sandboxJournalStats
   };
 }
+
+chrome.runtime.onInstalled.addListener(() => {
+  console.log("🚀 Antigravity SW Client: Extension installed or reloaded. Refreshing active Binance Futures tabs...");
+  chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError || !tabs) return;
+    for (const tab of tabs) {
+      if (tab.url && tab.url.includes("binance.com") && tab.url.includes("/futures/")) {
+        console.log(`🔄 Auto-reloading Binance futures tab: ${tab.id} to refresh content script`);
+        chrome.tabs.reload(tab.id);
+      }
+    }
+  });
+});
+

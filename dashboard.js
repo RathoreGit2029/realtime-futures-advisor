@@ -67,6 +67,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const groupWalletBalance = document.getElementById('group-wallet-balance');
   const groupTimeoutCandles = document.getElementById('group-timeout-candles');
 
+  const sweepLookbackInput = document.getElementById('sweep-lookback');
+  const sweepLookbackVal = document.getElementById('sweep-lookback-val');
+  const sweepWickInput = document.getElementById('sweep-wick-ratio');
+  const sweepWickVal = document.getElementById('sweep-wick-val');
+  const maxSpreadInput = document.getElementById('max-spread-pct');
+  const maxSpreadVal = document.getElementById('max-spread-val');
+  const kellyFactorInput = document.getElementById('kelly-factor');
+  const kellyFactorVal = document.getElementById('kelly-factor-val');
+  const maxHeatInput = document.getElementById('max-portfolio-heat');
+  const maxHeatVal = document.getElementById('max-portfolio-heat-val');
+  const maxMarginInput = document.getElementById('max-portfolio-margin');
+  const maxMarginVal = document.getElementById('max-portfolio-margin-val');
+
   let loadedWalletBalance = 1000;
   let loadedSandboxWalletBalance = 1000;
 
@@ -109,6 +122,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (walletBalanceVal) walletBalanceVal.textContent = `$${walletBalanceInput.value}`;
     });
   }
+
+  if (sweepLookbackInput) sweepLookbackInput.addEventListener('input', () => { sweepLookbackVal.textContent = sweepLookbackInput.value; });
+  if (sweepWickInput) sweepWickInput.addEventListener('input', () => { sweepWickVal.textContent = `${sweepWickInput.value}%`; });
+  if (maxSpreadInput) maxSpreadInput.addEventListener('input', () => { maxSpreadVal.textContent = `${maxSpreadInput.value}%`; });
+  if (kellyFactorInput) kellyFactorInput.addEventListener('input', () => { kellyFactorVal.textContent = kellyFactorInput.value; });
+  if (maxHeatInput) maxHeatInput.addEventListener('input', () => { maxHeatVal.textContent = `${maxHeatInput.value}%`; });
+  if (maxMarginInput) maxMarginInput.addEventListener('input', () => { maxMarginVal.textContent = `${maxMarginInput.value}%`; });
 
   function updateMarginModeVisibility() {
     if (marginModeSelect && marginModeSelect.value === 'CROSS') {
@@ -401,6 +421,31 @@ document.addEventListener('DOMContentLoaded', () => {
     if (enableTimeoutCheck) enableTimeoutCheck.checked = items.enableTimeout !== false;
     if (timeoutCandlesInput) timeoutCandlesInput.value = items.timeoutCandles !== undefined ? items.timeoutCandles : 12;
 
+    if (sweepLookbackInput) {
+      sweepLookbackInput.value = items.sweepLookback !== undefined ? items.sweepLookback : 30;
+      sweepLookbackVal.textContent = sweepLookbackInput.value;
+    }
+    if (sweepWickInput) {
+      sweepWickInput.value = items.sweepWickRatio !== undefined ? Math.round(items.sweepWickRatio * 100) : 50;
+      sweepWickVal.textContent = `${sweepWickInput.value}%`;
+    }
+    if (maxSpreadInput) {
+      maxSpreadInput.value = items.maxSpreadPct !== undefined ? items.maxSpreadPct : 0.05;
+      maxSpreadVal.textContent = `${maxSpreadInput.value}%`;
+    }
+    if (kellyFactorInput) {
+      kellyFactorInput.value = items.kellyFactor !== undefined ? items.kellyFactor : 0.25;
+      kellyFactorVal.textContent = kellyFactorInput.value;
+    }
+    if (maxHeatInput) {
+      maxHeatInput.value = items.maxPortfolioHeat !== undefined ? Math.round(items.maxPortfolioHeat * 100) : 15;
+      maxHeatVal.textContent = `${maxHeatInput.value}%`;
+    }
+    if (maxMarginInput) {
+      maxMarginInput.value = items.maxPortfolioMargin !== undefined ? Math.round(items.maxPortfolioMargin * 100) : 30;
+      maxMarginVal.textContent = `${maxMarginInput.value}%`;
+    }
+
     updateMarginModeVisibility();
     updateTimeoutVisibility();
 
@@ -578,6 +623,31 @@ document.addEventListener('DOMContentLoaded', () => {
     if (changes.targetMode) targetModeSelect.value = changes.targetMode.newValue;
     if (changes.customTakeProfit) customTpInput.value = changes.customTakeProfit.newValue;
     if (changes.customStopLoss) customSlInput.value = changes.customStopLoss.newValue;
+
+    if (changes.sweepLookback) {
+      sweepLookbackInput.value = changes.sweepLookback.newValue;
+      sweepLookbackVal.textContent = changes.sweepLookback.newValue;
+    }
+    if (changes.sweepWickRatio) {
+      sweepWickInput.value = Math.round(changes.sweepWickRatio.newValue * 100);
+      sweepWickVal.textContent = `${sweepWickInput.value}%`;
+    }
+    if (changes.maxSpreadPct) {
+      maxSpreadInput.value = changes.maxSpreadPct.newValue;
+      maxSpreadVal.textContent = `${changes.maxSpreadPct.newValue}%`;
+    }
+    if (changes.kellyFactor) {
+      kellyFactorInput.value = changes.kellyFactor.newValue;
+      kellyFactorVal.textContent = changes.kellyFactor.newValue;
+    }
+    if (changes.maxPortfolioHeat) {
+      maxHeatInput.value = Math.round(changes.maxPortfolioHeat.newValue * 100);
+      maxHeatVal.textContent = `${maxHeatInput.value}%`;
+    }
+    if (changes.maxPortfolioMargin) {
+      maxMarginInput.value = Math.round(changes.maxPortfolioMargin.newValue * 100);
+      maxMarginVal.textContent = `${maxMarginInput.value}%`;
+    }
   });
 
   // 3. Apply configurations button
@@ -606,7 +676,13 @@ document.addEventListener('DOMContentLoaded', () => {
       enableTimeout: enableTimeoutCheck ? enableTimeoutCheck.checked : true,
       timeoutCandles: timeoutCandlesInput ? parseInt(timeoutCandlesInput.value) : 12,
       timeframe: timeframeSelect ? timeframeSelect.value : '5m',
-      customTpSlMode: customTpSlModeSelect ? customTpSlModeSelect.value : 'margin'
+      customTpSlMode: customTpSlModeSelect ? customTpSlModeSelect.value : 'margin',
+      sweepLookback: sweepLookbackInput ? parseInt(sweepLookbackInput.value) : 30,
+      sweepWickRatio: sweepWickInput ? parseFloat(sweepWickInput.value) / 100 : 0.5,
+      maxSpreadPct: maxSpreadInput ? parseFloat(maxSpreadInput.value) : 0.05,
+      kellyFactor: kellyFactorInput ? parseFloat(kellyFactorInput.value) : 0.25,
+      maxPortfolioHeat: maxHeatInput ? parseFloat(maxHeatInput.value) / 100 : 0.15,
+      maxPortfolioMargin: maxMarginInput ? parseFloat(maxMarginInput.value) / 100 : 0.30
     };
 
     if (walletBalanceInput) {
@@ -627,6 +703,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Notify all open tabs to update settings
       chrome.tabs.query({}, (tabs) => {
+        if (chrome.runtime.lastError || !tabs) return;
         tabs.forEach(tab => {
           if (tab.url && tab.url.includes('binance.com')) {
             chrome.tabs.sendMessage(tab.id, { type: 'UPDATE_SETTINGS', settings: newSettings }).catch(() => {});
@@ -1186,9 +1263,28 @@ document.addEventListener('DOMContentLoaded', () => {
       const biasClass = state.direction === 'LONG' ? 'bullish' : state.direction === 'SHORT' ? 'bearish' : 'neutral';
       const biasText = state.direction === 'LONG' ? 'BULLISH SETUP' : state.direction === 'SHORT' ? 'BEARISH SETUP' : 'SCANNING RANGE';
       
-      // Indicators object
-      const ind = state.indicators || { rsi: '--', ema9: 0, ema21: 0, bullishOB: 0, bearishOB: 0 };
-      const emaLabel = state.currentTickPrice > ind.ema21 ? 'BULL' : 'BEAR';
+      const dispVal = state.displacementScore != null ? state.displacementScore : '--';
+      const dispColor = state.displacementScore >= 60 ? 'var(--green)' : state.displacementScore >= 40 ? 'var(--accent)' : 'var(--red)';
+      
+      let rangeVal = 'No Dealing Range';
+      let rangeColor = 'var(--text-muted)';
+      if (state.dealingRangeHigh != null && state.dealingRangeLow != null && state.equilibrium != null) {
+        const isPremium = state.currentTickPrice > state.equilibrium;
+        rangeVal = isPremium ? 'Premium' : 'Discount';
+        rangeColor = isPremium ? 'var(--red)' : 'var(--green)';
+      }
+      
+      let fvgVal = 'No active FVG';
+      let fvgColor = 'var(--text-muted)';
+      if (state.fvgTop != null && state.fvgBottom != null) {
+        fvgVal = `${parseFloat(state.fvgBottom).toFixed(2)}-${parseFloat(state.fvgTop).toFixed(2)}`;
+        fvgColor = 'var(--green)';
+      }
+      
+      let sweepVal = 'Scanning Liquidity...';
+      if (state.sweptPoolType && state.sweptPoolPrice) {
+        sweepVal = `${state.sweptPoolType} swept at $${parseFloat(state.sweptPoolPrice).toFixed(2)}`;
+      }
 
       html += `
         <div class="scan-card">
@@ -1204,27 +1300,27 @@ document.addEventListener('DOMContentLoaded', () => {
             <span>${state.pattern || 'Scanning'}</span>
             <span style="font-family: monospace; font-weight: 700; color: #fff;">$${state.currentTickPrice ? parseFloat(state.currentTickPrice).toFixed(2) : '--'}</span>
           </div>
-
+ 
           <div class="scan-indicators">
             <div>
-              <span class="scan-ind-lbl">RSI (14)</span>
+              <span class="scan-ind-lbl">Displacement</span>
             </div>
-            <div class="scan-ind-val" style="color: ${ind.rsi < 32 ? 'var(--green)' : ind.rsi > 68 ? 'var(--red)' : 'var(--accent)'}">${ind.rsi}</div>
+            <div class="scan-ind-val" style="color: ${dispColor}">${dispVal}</div>
 
             <div>
-              <span class="scan-ind-lbl">EMA Trend</span>
+              <span class="scan-ind-lbl">Dealing Range</span>
             </div>
-            <div class="scan-ind-val" style="color: ${emaLabel === 'BULL' ? 'var(--green)' : 'var(--red)'}">${emaLabel}</div>
+            <div class="scan-ind-val" style="color: ${rangeColor}">${rangeVal}</div>
 
             <div>
-              <span class="scan-ind-lbl">Bullish OBs</span>
+              <span class="scan-ind-lbl">FVG Zone</span>
             </div>
-            <div class="scan-ind-val" style="color: var(--green);">${ind.bullishOB || 0}</div>
+            <div class="scan-ind-val" style="color: ${fvgColor}; font-size: 10px;">${fvgVal}</div>
 
-            <div>
-              <span class="scan-ind-lbl">Bearish OBs</span>
+            <div style="grid-column: span 2; border-top: 1px dashed var(--border); padding-top: 6px; margin-top: 4px;">
+              <span class="scan-ind-lbl" style="display: block; margin-bottom: 2px;">Swept Pool</span>
+              <span class="scan-ind-val" style="text-align: left; display: block; font-size: 9px; color: #fff;">${sweepVal}</span>
             </div>
-            <div class="scan-ind-val" style="color: var(--red);">${ind.bearishOB || 0}</div>
           </div>
         </div>
       `;

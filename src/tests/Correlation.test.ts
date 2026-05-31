@@ -167,6 +167,24 @@ describe('Correlation & Portfolio Risk Layer Unit Tests', () => {
       expect(result.reason).toContain('portfolio heat exceeds limit');
     });
 
+    it('should respect custom heat and margin limits from context', () => {
+      const constraint = new PortfolioHeatConstraint();
+      
+      const context = createMarketContext({
+        ...baseContext,
+        maxPortfolioHeat: 0.50, // Increase heat limit to 50%
+        maxPortfolioMargin: 0.50, // Increase margin limit to 50%
+        portfolioTrades: [
+          { symbol: 'BTCUSDT', direction: 'LONG', positionSize: 1, entry: 100, marginRequired: 33, status: 'ACTIVE' },
+          { symbol: 'ETHUSDT', direction: 'LONG', positionSize: 1, entry: 100, marginRequired: 33, status: 'ACTIVE' }
+        ]
+      });
+      
+      const result = constraint.evaluate(context);
+      expect(result.passed).toBe(true); // Should pass now because limit is 50%
+      expect(result.metadata.portfolioHeat).toBeLessThan(0.50);
+    });
+
     it('should evaluate prospective trade using fractional Kelly sizing and fail if combined heat is high', () => {
       const constraint = new PortfolioHeatConstraint();
       

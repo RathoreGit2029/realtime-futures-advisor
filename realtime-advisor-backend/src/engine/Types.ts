@@ -77,8 +77,26 @@ export interface MarketContext {
     direction: 'LONG' | 'SHORT';
     stopLoss: number;
     target1: number;
+    target2?: number;
     leverage?: number;
   };
+  readonly maxSpreadPct?: number;
+  readonly sweepLookback?: number;
+  readonly sweepWickRatio?: number;
+  readonly kellyFactor?: number;
+  readonly maxPortfolioHeat?: number;
+  readonly maxPortfolioMargin?: number;
+  readonly displacementScore?: number;
+  readonly sweptPoolType?: string;
+  readonly sweptPoolPrice?: number;
+  readonly mssPrice?: number;
+  readonly fvgTop?: number;
+  readonly fvgBottom?: number;
+  readonly dealingRangeHigh?: number;
+  readonly dealingRangeLow?: number;
+  readonly equilibrium?: number;
+  readonly primaryTarget?: number;
+  readonly secondaryTarget?: number;
   readonly deterministicHash: string;
 }
 
@@ -109,8 +127,26 @@ export interface RawMarketInput {
     direction: 'LONG' | 'SHORT';
     stopLoss: number;
     target1: number;
+    target2?: number;
     leverage?: number;
   };
+  maxSpreadPct?: number;
+  sweepLookback?: number;
+  sweepWickRatio?: number;
+  kellyFactor?: number;
+  maxPortfolioHeat?: number;
+  maxPortfolioMargin?: number;
+  displacementScore?: number;
+  sweptPoolType?: string;
+  sweptPoolPrice?: number;
+  mssPrice?: number;
+  fvgTop?: number;
+  fvgBottom?: number;
+  dealingRangeHigh?: number;
+  dealingRangeLow?: number;
+  equilibrium?: number;
+  primaryTarget?: number;
+  secondaryTarget?: number;
   /** Previous regime — used only for change-detection logging */
   regime?: MarketRegime;
 }
@@ -157,7 +193,24 @@ export function createMarketContext(
     positionActive: base.positionActive,
     portfolioTrades: base.portfolioTrades,
     portfolioWalletBalance: base.portfolioWalletBalance,
-    prospectiveTrade: base.prospectiveTrade
+    prospectiveTrade: base.prospectiveTrade,
+    maxSpreadPct: base.maxSpreadPct,
+    sweepLookback: base.sweepLookback,
+    sweepWickRatio: base.sweepWickRatio,
+    kellyFactor: base.kellyFactor,
+    maxPortfolioHeat: base.maxPortfolioHeat,
+    maxPortfolioMargin: base.maxPortfolioMargin,
+    displacementScore: base.displacementScore,
+    sweptPoolType: base.sweptPoolType,
+    sweptPoolPrice: base.sweptPoolPrice,
+    mssPrice: base.mssPrice,
+    fvgTop: base.fvgTop,
+    fvgBottom: base.fvgBottom,
+    dealingRangeHigh: base.dealingRangeHigh,
+    dealingRangeLow: base.dealingRangeLow,
+    equilibrium: base.equilibrium,
+    primaryTarget: base.primaryTarget,
+    secondaryTarget: base.secondaryTarget
   });
 
   return {
