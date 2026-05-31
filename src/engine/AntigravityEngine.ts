@@ -15,6 +15,7 @@ import { RegimeConstraint } from '../constraints/RegimeConstraint';
 import { VolatilityConstraint } from '../constraints/VolatilityConstraint';
 import { LiquidityConstraint } from '../constraints/LiquidityConstraint';
 import { HTFAlignmentConstraint } from '../constraints/HTFAlignmentConstraint';
+import { PortfolioHeatConstraint } from '../constraints/PortfolioHeatConstraint';
 
 export interface MarketEvaluation {
   context: MarketContext;
@@ -40,10 +41,12 @@ export class AntigravityEngine {
     // 2. Volatility — two numeric comparisons
     // 3. Liquidity — sweep quality check
     // 4. HTF Alignment — last because it depends on async REST data that may be null
+    // 5. Portfolio Heat — portfolio correlation and margin checks
     this.constraintEngine.registerConstraint(new RegimeConstraint());
     this.constraintEngine.registerConstraint(new VolatilityConstraint());
     this.constraintEngine.registerConstraint(new LiquidityConstraint());
     this.constraintEngine.registerConstraint(new HTFAlignmentConstraint());
+    this.constraintEngine.registerConstraint(new PortfolioHeatConstraint());
   }
 
   /**

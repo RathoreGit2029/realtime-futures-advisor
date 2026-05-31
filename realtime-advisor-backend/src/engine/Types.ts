@@ -71,6 +71,14 @@ export interface MarketContext {
   readonly confidence: number;
   readonly currentPrice: number;
   readonly positionActive?: boolean;
+  readonly portfolioTrades?: any[];
+  readonly portfolioWalletBalance?: number;
+  readonly prospectiveTrade?: {
+    direction: 'LONG' | 'SHORT';
+    stopLoss: number;
+    target1: number;
+    leverage?: number;
+  };
   readonly deterministicHash: string;
 }
 
@@ -95,6 +103,14 @@ export interface RawMarketInput {
   currentPrice: number;
   sequenceNumber?: number;
   positionActive?: boolean;
+  portfolioTrades?: any[];
+  portfolioWalletBalance?: number;
+  prospectiveTrade?: {
+    direction: 'LONG' | 'SHORT';
+    stopLoss: number;
+    target1: number;
+    leverage?: number;
+  };
   /** Previous regime — used only for change-detection logging */
   regime?: MarketRegime;
 }
@@ -138,7 +154,10 @@ export function createMarketContext(
     orderbookImbalance: base.orderbookImbalance,
     confidence: base.confidence,
     currentPrice: base.currentPrice,
-    positionActive: base.positionActive
+    positionActive: base.positionActive,
+    portfolioTrades: base.portfolioTrades,
+    portfolioWalletBalance: base.portfolioWalletBalance,
+    prospectiveTrade: base.prospectiveTrade
   });
 
   return {

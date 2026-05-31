@@ -32,6 +32,7 @@ const VolatilityConstraint_js_1 = require("../constraints/VolatilityConstraint.j
 const LiquidityConstraint_js_1 = require("../constraints/LiquidityConstraint.js");
 const HTFAlignmentConstraint_js_1 = require("../constraints/HTFAlignmentConstraint.js");
 const MicrostructureConstraint_js_1 = require("../constraints/MicrostructureConstraint.js");
+const PortfolioHeatConstraint_js_1 = require("../constraints/PortfolioHeatConstraint.js");
 class AntigravityEngine {
     logger = EventSourcing_js_1.EventLog.getInstance();
     regimeEngine = new MarketRegimeEngine_js_1.MarketRegimeEngine();
@@ -49,11 +50,13 @@ class AntigravityEngine {
         // 3. Liquidity — sweep quality check
         // 4. HTF Alignment — last because it depends on async REST data that may be null
         // 5. Microstructure — orderbook L2 checks before final execution gate
+        // 6. Portfolio Heat — portfolio correlation and margin checks
         this.constraintEngine.registerConstraint(new RegimeConstraint_js_1.RegimeConstraint());
         this.constraintEngine.registerConstraint(new VolatilityConstraint_js_1.VolatilityConstraint());
         this.constraintEngine.registerConstraint(new LiquidityConstraint_js_1.LiquidityConstraint());
         this.constraintEngine.registerConstraint(new HTFAlignmentConstraint_js_1.HTFAlignmentConstraint());
         this.constraintEngine.registerConstraint(new MicrostructureConstraint_js_1.MicrostructureConstraint());
+        this.constraintEngine.registerConstraint(new PortfolioHeatConstraint_js_1.PortfolioHeatConstraint());
     }
     /**
      * Single evaluation path.

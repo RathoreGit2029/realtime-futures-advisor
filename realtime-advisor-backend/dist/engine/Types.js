@@ -64,7 +64,10 @@ function createMarketContext(base) {
         orderbookImbalance: base.orderbookImbalance,
         confidence: base.confidence,
         currentPrice: base.currentPrice,
-        positionActive: base.positionActive
+        positionActive: base.positionActive,
+        portfolioTrades: base.portfolioTrades,
+        portfolioWalletBalance: base.portfolioWalletBalance,
+        prospectiveTrade: base.prospectiveTrade
     });
     return {
         ...base,

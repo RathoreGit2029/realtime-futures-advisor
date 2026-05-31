@@ -83,9 +83,13 @@ var AntigravityCore = (() => {
       displacementQuality: base.displacementQuality,
       spread: base.spread,
       orderbookDepth: base.orderbookDepth,
+      orderbookImbalance: base.orderbookImbalance,
       confidence: base.confidence,
       currentPrice: base.currentPrice,
-      positionActive: base.positionActive
+      positionActive: base.positionActive,
+      portfolioTrades: base.portfolioTrades,
+      portfolioWalletBalance: base.portfolioWalletBalance,
+      prospectiveTrade: base.prospectiveTrade
     });
     return {
       ...base,
@@ -1160,6 +1164,193 @@ var AntigravityCore = (() => {
     }
   };
 
+  // src/engine/CorrelationEngine.ts
+  var CorrelationEngine = class {
+    static matrix = {};
+    static setMatrix(newMatrix) {
+      this.matrix = newMatrix;
+    }
+    static getCorrelation(sym1, sym2) {
+      if (sym1 === sym2) return 1;
+      return this.matrix[sym1]?.[sym2] ?? 0;
+    }
+    /**
+     * Calculates simple returns for a series of candles.
+     * R_t = (Close_t - Close_{t-1}) / Close_{t-1}
+     * For N candles, returns N-1 return values.
+     */
+    static calculateReturns(candles) {
+      const returns = [];
+      for (let i = 1; i < candles.length; i++) {
+        const prevClose = candles[i - 1].close;
+        if (prevClose === 0) {
+          returns.push(0);
+        } else {
+          returns.push((candles[i].close - prevClose) / prevClose);
+        }
+      }
+      return returns;
+    }
+    /**
+     * Computes Pearson correlation coefficient between two return series.
+     * Minimum length for correlation is 2. Defaults to 0 if not enough data or zero variance.
+     */
+    static calculatePearsonCorrelation(x, y) {
+      const len = Math.min(x.length, y.length);
+      if (len < 2) return 0;
+      const xs = x.slice(-len);
+      const ys = y.slice(-len);
+      const xMean = xs.reduce((a, b) => a + b, 0) / len;
+      const yMean = ys.reduce((a, b) => a + b, 0) / len;
+      let num = 0;
+      let denX = 0;
+      let denY = 0;
+      for (let i = 0; i < len; i++) {
+        const diffX = xs[i] - xMean;
+        const diffY = ys[i] - yMean;
+        num += diffX * diffY;
+        denX += diffX * diffX;
+        denY += diffY * diffY;
+      }
+      if (denX === 0 || denY === 0) {
+        return 0;
+      }
+      return num / Math.sqrt(denX * denY);
+    }
+    /**
+     * Returns a map of symbol-to-symbol correlation values.
+     * Represented as a Record<string, Record<string, number>>.
+     */
+    static calculateCorrelationMatrix(symbolCandles, windowSize = 50) {
+      const matrix = {};
+      const symbols = Object.keys(symbolCandles);
+      const returnSeries = {};
+      for (const sym of symbols) {
+        const allCandles = symbolCandles[sym] || [];
+        const closedCandles = allCandles.slice(0, -1).slice(-windowSize);
+        if (closedCandles.length >= 2) {
+          returnSeries[sym] = this.calculateReturns(closedCandles);
+        } else {
+          returnSeries[sym] = [];
+        }
+      }
+      for (const sym1 of symbols) {
+        matrix[sym1] = {};
+        for (const sym2 of symbols) {
+          if (sym1 === sym2) {
+            matrix[sym1][sym2] = 1;
+          } else {
+            matrix[sym1][sym2] = 0;
+          }
+        }
+      }
+      for (let i = 0; i < symbols.length; i++) {
+        const sym1 = symbols[i];
+        const r1 = returnSeries[sym1];
+        if (!r1 || r1.length < 2) continue;
+        for (let j = i + 1; j < symbols.length; j++) {
+          const sym2 = symbols[j];
+          const r2 = returnSeries[sym2];
+          if (!r2 || r2.length < 2) continue;
+          const corr = this.calculatePearsonCorrelation(r1, r2);
+          matrix[sym1][sym2] = corr;
+          matrix[sym2][sym1] = corr;
+        }
+      }
+      return matrix;
+    }
+  };
+
+  // src/constraints/PortfolioHeatConstraint.ts
+  var PortfolioHeatConstraint = class {
+    id = "PortfolioHeatConstraint";
+    evaluate(ctx) {
+      const walletBalance = ctx.portfolioWalletBalance || 1e3;
+      const activeTrades = ctx.portfolioTrades || [];
+      const allTrades = [];
+      for (const trade of activeTrades) {
+        const entryPrice = trade.entry || ctx.currentPrice;
+        const weight = (trade.direction === "LONG" ? 1 : -1) * (trade.positionSize * entryPrice) / walletBalance;
+        allTrades.push({
+          symbol: trade.symbol,
+          direction: trade.direction,
+          positionSize: trade.positionSize,
+          entryPrice,
+          marginRequired: trade.marginRequired || 0,
+          weight
+        });
+      }
+      if (ctx.prospectiveTrade) {
+        const pt = ctx.prospectiveTrade;
+        const entry = ctx.currentPrice;
+        const p = ctx.confidence / 100;
+        const riskPerUnit = Math.abs(entry - pt.stopLoss);
+        let R = 1.5;
+        if (riskPerUnit > 0) {
+          R = Math.abs(pt.target1 - entry) / riskPerUnit;
+        }
+        const rawKelly = R > 0 ? 0.25 * ((p * R - (1 - p)) / R) : 0.025;
+        const clampedKelly = Math.max(0.01, Math.min(0.1, rawKelly));
+        const riskAmount = walletBalance * clampedKelly;
+        const positionSize = riskPerUnit > 0 ? riskAmount / riskPerUnit : 0;
+        if (positionSize > 0) {
+          const lev = pt.leverage || 3;
+          const marginRequired = positionSize * entry / lev;
+          const weight = (pt.direction === "LONG" ? 1 : -1) * (positionSize * entry) / walletBalance;
+          allTrades.push({
+            symbol: ctx.symbol,
+            direction: pt.direction,
+            positionSize,
+            entryPrice: entry,
+            marginRequired,
+            weight
+          });
+        }
+      }
+      if (allTrades.length === 0) {
+        return {
+          passed: true,
+          confidenceImpact: 0,
+          reason: "Portfolio is empty, heat and margin bounds are nominal."
+        };
+      }
+      let totalMargin = 0;
+      for (const trade of allTrades) {
+        totalMargin += trade.marginRequired;
+      }
+      const marginRatio = totalMargin / walletBalance;
+      if (marginRatio > 0.3) {
+        return {
+          passed: false,
+          confidenceImpact: 0,
+          reason: `Aggregate margin exceeds limit: ${(marginRatio * 100).toFixed(2)}% > 30%`
+        };
+      }
+      let doubleSum = 0;
+      for (const t1 of allTrades) {
+        for (const t2 of allTrades) {
+          const rho = CorrelationEngine.getCorrelation(t1.symbol, t2.symbol);
+          doubleSum += t1.weight * t2.weight * rho;
+        }
+      }
+      const portfolioHeat = Math.sqrt(Math.max(0, doubleSum));
+      if (portfolioHeat > 0.15) {
+        return {
+          passed: false,
+          confidenceImpact: 0,
+          reason: `Correlation-weighted portfolio heat exceeds limit: ${(portfolioHeat * 100).toFixed(2)}% > 15%`,
+          metadata: { portfolioHeat }
+        };
+      }
+      return {
+        passed: true,
+        confidenceImpact: 0,
+        reason: `Portfolio heat is within bounds: ${(portfolioHeat * 100).toFixed(2)}% (limit 15%), margin is ${(marginRatio * 100).toFixed(2)}% (limit 30%).`,
+        metadata: { portfolioHeat }
+      };
+    }
+  };
+
   // src/engine/AntigravityEngine.ts
   var AntigravityEngine = class {
     logger = EventLog.getInstance();
@@ -1175,6 +1366,7 @@ var AntigravityCore = (() => {
       this.constraintEngine.registerConstraint(new VolatilityConstraint());
       this.constraintEngine.registerConstraint(new LiquidityConstraint());
       this.constraintEngine.registerConstraint(new HTFAlignmentConstraint());
+      this.constraintEngine.registerConstraint(new PortfolioHeatConstraint());
     }
     /**
      * Single evaluation path.
@@ -1583,7 +1775,15 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // 5. Inbound communication from popup / dashboard UI pages
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "OPEN_DASHBOARD") {
-    chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+    const dashboardUrl = chrome.runtime.getURL("dashboard.html");
+    chrome.tabs.query({ url: dashboardUrl }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        chrome.tabs.update(tabs[0].id, { active: true });
+        chrome.windows.update(tabs[0].windowId, { focused: true });
+      } else {
+        chrome.tabs.create({ url: dashboardUrl });
+      }
+    });
     sendResponse({ success: true });
     return false;
   }

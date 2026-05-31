@@ -2,6 +2,7 @@ import { WebSocket } from 'ws';
 import { AntigravityEngine } from './AntigravityEngine.js';
 import { EventLog } from './EventSourcing.js';
 import { calculateEMA, calculateRSI, calculateMACD, calculateATR, detectLiquiditySweep, detectOrderBlocks, detectFVG, Candle } from './Indicators.js';
+import { CorrelationEngine } from './CorrelationEngine.js';
 import { MarketRegime, MarketState, RawMarketInput, MarketContext } from './Types.js';
 import { db } from '../db/index.js';
 import { advisorSignals } from '../db/schema.js';
@@ -574,6 +575,14 @@ export class BinanceWebSocketManager {
                 this.resolveActiveTrade(symbol, "TIMEOUT");
               }
             }
+
+            // Recalculate correlation matrix on closed candle boundary
+            const candlesMap: Record<string, Candle[]> = {};
+            for (const sym in this.symbolData) {
+              candlesMap[sym] = this.symbolData[sym].candles;
+            }
+            const matrix = CorrelationEngine.calculateCorrelationMatrix(candlesMap);
+            CorrelationEngine.setMatrix(matrix);
           }
 
           this.runCalculations(symbol);
@@ -750,6 +759,52 @@ export class BinanceWebSocketManager {
       ? MarketState.NO_TRADE
       : (hasSweep ? MarketState.EXECUTION_WINDOW : MarketState.NO_TRADE);
 
+    // Pre-calculate prospective trade parameters if there's no active trade on this symbol
+    const intendedDirection = trendDir === 'UP' ? 'LONG' : (trendDir === 'DOWN' ? 'SHORT' : 'WAITING');
+    let prospectiveTrade = undefined;
+
+    if (intendedDirection !== 'WAITING' && !activeTrade) {
+      const useCustom = this.state.settings.targetMode === 'CUSTOM';
+      let prospectiveStopLoss = 0;
+      let prospectiveTarget1 = 0;
+      if (useCustom) {
+        const lev = this.state.settings.leverage || 3;
+        const isPos = this.state.settings.customTpSlMode === 'position';
+        const slP = isPos ? parseFloat(this.state.settings.customStopLoss) : parseFloat(this.state.settings.customStopLoss) / lev;
+        const tpP = isPos ? parseFloat(this.state.settings.customTakeProfit) : parseFloat(this.state.settings.customTakeProfit) / lev;
+
+        if (intendedDirection === 'LONG') {
+          prospectiveStopLoss = curClose * (1 - (slP / 100));
+          prospectiveTarget1 = curClose * (1 + (tpP / 100));
+        } else {
+          prospectiveStopLoss = curClose * (1 + (slP / 100));
+          prospectiveTarget1 = curClose * (1 - (tpP / 100));
+        }
+      } else {
+        if (intendedDirection === 'LONG') {
+          const closestOB = orderBlocks.bullish.filter((ob: any) => ob.unmitigated && ob.low < curClose).pop();
+          prospectiveStopLoss = closestOB ? closestOB.low : curClose - (curAtr * 1.5);
+          prospectiveTarget1 = curClose + (curClose - prospectiveStopLoss) * 1.5;
+        } else {
+          const closestOB = orderBlocks.bearish.filter((ob: any) => ob.unmitigated && ob.high > curClose).pop();
+          prospectiveStopLoss = closestOB ? closestOB.high : curClose + (curAtr * 1.5);
+          prospectiveTarget1 = curClose - (prospectiveStopLoss - curClose) * 1.5;
+        }
+      }
+      prospectiveTrade = {
+        direction: intendedDirection as 'LONG' | 'SHORT',
+        stopLoss: prospectiveStopLoss,
+        target1: prospectiveTarget1,
+        leverage: this.state.settings.leverage || 3
+      };
+    }
+
+    const isSandbox = !!this.state.settings.sandboxMode;
+    const portfolioWalletBalance = isSandbox ? this.state.sandboxWalletBalance : this.state.walletBalance;
+    const portfolioTrades = Object.values(this.state.activeTrades).filter(t => 
+      isSandbox ? t.status === 'SANDBOX_ACTIVE' : t.status === 'ACTIVE'
+    );
+
     const draftCtx: RawMarketInput = {
       timestamp: sData.lastWsEventTime,
       symbol: symbol,
@@ -772,7 +827,10 @@ export class BinanceWebSocketManager {
       orderbookDepth: sData.orderbookDepth,
       orderbookImbalance: sData.orderbookImbalance,
       confidence: 50,
-      currentPrice: curClose
+      currentPrice: curClose,
+      portfolioWalletBalance,
+      portfolioTrades,
+      prospectiveTrade
     };
 
     try {
@@ -792,6 +850,43 @@ export class BinanceWebSocketManager {
           deterministicHash: ''
         };
       }
+
+      // Log PortfolioRiskEvaluated event
+      const heatEval = evaluation.decision.individualEvaluations.find(
+        (e: any) => e.constraintId === 'PortfolioHeatConstraint'
+      );
+      const portfolioHeat = heatEval?.metadata?.portfolioHeat ?? 0;
+
+      let totalMargin = 0;
+      for (const t of portfolioTrades) {
+        totalMargin += t.marginRequired || 0;
+      }
+      if (prospectiveTrade && evaluation.decision.tradeEligible) {
+        const p = evaluation.context.confidence / 100;
+        const entry = curClose;
+        const riskPerUnit = Math.abs(entry - prospectiveTrade.stopLoss);
+        let R = 1.5;
+        if (riskPerUnit > 0) {
+          R = Math.abs(prospectiveTrade.target1 - entry) / riskPerUnit;
+        }
+        const rawKelly = R > 0 ? 0.25 * ((p * R - (1 - p)) / R) : 0.025;
+        const clampedKelly = Math.max(0.01, Math.min(0.10, rawKelly));
+        const riskAmount = portfolioWalletBalance * clampedKelly;
+        const positionSize = riskPerUnit > 0 ? riskAmount / riskPerUnit : 0;
+        const lev = prospectiveTrade.leverage || 3;
+        totalMargin += (positionSize * entry) / lev;
+      }
+
+      EventLog.getInstance().append({
+        type: 'PortfolioRiskEvaluated',
+        correlationId: symbol,
+        payload: {
+          portfolioHeat,
+          walletBalance: portfolioWalletBalance,
+          marginRatio: portfolioWalletBalance > 0 ? totalMargin / portfolioWalletBalance : 0
+        },
+        marketContextSnapshot: evaluation.context
+      });
 
       if (sData.advisorMode === "MONITORING") {
         this.runExitCalculations(symbol, curClose, curEma9, curEma21, curRsi, orderBlocks, sweeps);
@@ -909,9 +1004,21 @@ export class BinanceWebSocketManager {
     const stopLoss = signal.stopLoss;
     const entry = signal.entry || curClose;
     
-    // Position Calculations
-    const riskAmount = this.state.settings.riskAmount || 20;
+    // Position Calculations with Quarter-Kelly sizing
+    const walletBalance = this.state.settings.sandboxMode ? this.state.sandboxWalletBalance : this.state.walletBalance;
+    const p = probability / 100;
     const riskPerUnit = Math.abs(entry - stopLoss);
+    
+    let R = 1.5;
+    if (riskPerUnit > 0) {
+      R = Math.abs(signal.target1 - entry) / riskPerUnit;
+    }
+    
+    // Fractional Kelly Sizing formula: f* = 0.25 * (p * R - (1 - p)) / R
+    const rawKelly = R > 0 ? 0.25 * ((p * R - (1 - p)) / R) : 0.025;
+    const clampedKelly = Math.max(0.01, Math.min(0.10, rawKelly)); // Clamped to 1% - 10%
+    
+    const riskAmount = walletBalance * clampedKelly;
     const positionSize = riskPerUnit > 0 ? riskAmount / riskPerUnit : 0;
     if (positionSize <= 0) return;
 

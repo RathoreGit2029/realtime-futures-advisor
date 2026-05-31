@@ -16,6 +16,7 @@ import { VolatilityConstraint } from '../constraints/VolatilityConstraint.js';
 import { LiquidityConstraint } from '../constraints/LiquidityConstraint.js';
 import { HTFAlignmentConstraint } from '../constraints/HTFAlignmentConstraint.js';
 import { MicrostructureConstraint } from '../constraints/MicrostructureConstraint.js';
+import { PortfolioHeatConstraint } from '../constraints/PortfolioHeatConstraint.js';
 
 export interface MarketEvaluation {
   context: MarketContext;
@@ -42,11 +43,13 @@ export class AntigravityEngine {
     // 3. Liquidity — sweep quality check
     // 4. HTF Alignment — last because it depends on async REST data that may be null
     // 5. Microstructure — orderbook L2 checks before final execution gate
+    // 6. Portfolio Heat — portfolio correlation and margin checks
     this.constraintEngine.registerConstraint(new RegimeConstraint());
     this.constraintEngine.registerConstraint(new VolatilityConstraint());
     this.constraintEngine.registerConstraint(new LiquidityConstraint());
     this.constraintEngine.registerConstraint(new HTFAlignmentConstraint());
     this.constraintEngine.registerConstraint(new MicrostructureConstraint());
+    this.constraintEngine.registerConstraint(new PortfolioHeatConstraint());
   }
 
   /**

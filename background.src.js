@@ -299,7 +299,15 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // 5. Inbound communication from popup / dashboard UI pages
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "OPEN_DASHBOARD") {
-    chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+    const dashboardUrl = chrome.runtime.getURL("dashboard.html");
+    chrome.tabs.query({ url: dashboardUrl }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        chrome.tabs.update(tabs[0].id, { active: true });
+        chrome.windows.update(tabs[0].windowId, { focused: true });
+      } else {
+        chrome.tabs.create({ url: dashboardUrl });
+      }
+    });
     sendResponse({ success: true });
     return false;
   }
