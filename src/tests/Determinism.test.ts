@@ -106,13 +106,13 @@ describe('Determinism', () => {
     const engine = new AntigravityEngine();
     const cb = (engine as any).circuitBreakers;
 
-    // timestamp = 1000, wallClock = 7000 → latency = 6000ms > 5000ms threshold
+    // timestamp = 1000, wallClock = 70000 → latency = 69000ms > 60000ms threshold
     const ctx = makeRawCtx({ timestamp: 1000 });
     // Build a full context so the CB receives the right type
     const fullCtx = engine.evaluateMarket(ctx).context;
 
-    const h1 = cb.evaluateSystemHealth(fullCtx, [], 7000);
-    const h2 = cb.evaluateSystemHealth(fullCtx, [], 7000);
+    const h1 = cb.evaluateSystemHealth(fullCtx, [], 70000);
+    const h2 = cb.evaluateSystemHealth(fullCtx, [], 70000);
 
     expect(h1.halted).toBe(true);
     expect(h1.breakerType).toBe('DATA_LATENCY');

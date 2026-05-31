@@ -42,7 +42,7 @@ export class CircuitBreakerEngine {
       // Disabled by default because background.js uses a synthetic spread.
       // Enable and lower this threshold only when real order-book spread is available.
       maxSpreadToAtrRatio: Infinity,
-      maxDataLatencyMs: 5000,
+      maxDataLatencyMs: 60000,
       maxConsecutiveRejections: 5,
       maxVolatilityRank: 95,
       minSweepQualityWhenSweepPresent: 40,

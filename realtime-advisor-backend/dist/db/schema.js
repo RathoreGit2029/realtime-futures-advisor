@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.advisorSignals = void 0;
+exports.advisorSnapshots = exports.advisorEvents = exports.advisorSignals = void 0;
 const pg_core_1 = require("drizzle-orm/pg-core");
 /** Signals persisted from the Binance Futures Real-Time Advisor Chrome extension. */
 exports.advisorSignals = (0, pg_core_1.pgTable)('advisor_signals', {
@@ -36,4 +36,25 @@ exports.advisorSignals = (0, pg_core_1.pgTable)('advisor_signals', {
     triggerCatalyst: (0, pg_core_1.varchar)('trigger_catalyst', { length: 2000 }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow(),
     resolvedAt: (0, pg_core_1.timestamp)('resolved_at', { withTimezone: true })
+});
+/** Authoritative Event Sourcing Log */
+exports.advisorEvents = (0, pg_core_1.pgTable)('advisor_events', {
+    sequenceNumber: (0, pg_core_1.integer)('sequence_number').primaryKey(),
+    exchangeTimestamp: (0, pg_core_1.bigint)('exchange_timestamp', { mode: 'number' }).notNull(),
+    receiveTimestamp: (0, pg_core_1.bigint)('receive_timestamp', { mode: 'number' }).notNull(),
+    eventId: (0, pg_core_1.varchar)('event_id', { length: 255 }).notNull(),
+    correlationId: (0, pg_core_1.varchar)('correlation_id', { length: 255 }).notNull(),
+    type: (0, pg_core_1.varchar)('type', { length: 100 }).notNull(),
+    payload: (0, pg_core_1.text)('payload').notNull(),
+    marketContextSnapshot: (0, pg_core_1.text)('market_context_snapshot'),
+    decisionMetadata: (0, pg_core_1.text)('decision_metadata'),
+    eventVersion: (0, pg_core_1.integer)('event_version').notNull(),
+    previousEventHash: (0, pg_core_1.varchar)('previous_event_hash', { length: 255 }),
+    deterministicHash: (0, pg_core_1.varchar)('deterministic_hash', { length: 255 }).notNull()
+});
+/** Event Sourcing State Checkpoint Snapshots */
+exports.advisorSnapshots = (0, pg_core_1.pgTable)('advisor_snapshots', {
+    sequenceNumber: (0, pg_core_1.integer)('sequence_number').primaryKey(),
+    stateData: (0, pg_core_1.text)('state_data').notNull(),
+    timestamp: (0, pg_core_1.bigint)('timestamp', { mode: 'number' }).notNull()
 });

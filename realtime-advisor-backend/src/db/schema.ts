@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, integer, decimal, timestamp, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, integer, decimal, timestamp, boolean, bigint, text } from 'drizzle-orm/pg-core';
 
 /** Signals persisted from the Binance Futures Real-Time Advisor Chrome extension. */
 export const advisorSignals = pgTable('advisor_signals', {
@@ -34,4 +34,27 @@ export const advisorSignals = pgTable('advisor_signals', {
   triggerCatalyst: varchar('trigger_catalyst', { length: 2000 }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   resolvedAt: timestamp('resolved_at', { withTimezone: true })
+});
+
+/** Authoritative Event Sourcing Log */
+export const advisorEvents = pgTable('advisor_events', {
+  sequenceNumber: integer('sequence_number').primaryKey(),
+  exchangeTimestamp: bigint('exchange_timestamp', { mode: 'number' }).notNull(),
+  receiveTimestamp: bigint('receive_timestamp', { mode: 'number' }).notNull(),
+  eventId: varchar('event_id', { length: 255 }).notNull(),
+  correlationId: varchar('correlation_id', { length: 255 }).notNull(),
+  type: varchar('type', { length: 100 }).notNull(),
+  payload: text('payload').notNull(),
+  marketContextSnapshot: text('market_context_snapshot'),
+  decisionMetadata: text('decision_metadata'),
+  eventVersion: integer('event_version').notNull(),
+  previousEventHash: varchar('previous_event_hash', { length: 255 }),
+  deterministicHash: varchar('deterministic_hash', { length: 255 }).notNull()
+});
+
+/** Event Sourcing State Checkpoint Snapshots */
+export const advisorSnapshots = pgTable('advisor_snapshots', {
+  sequenceNumber: integer('sequence_number').primaryKey(),
+  stateData: text('state_data').notNull(),
+  timestamp: bigint('timestamp', { mode: 'number' }).notNull()
 });

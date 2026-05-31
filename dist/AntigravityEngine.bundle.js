@@ -818,7 +818,7 @@ var AntigravityCore = (() => {
         // Disabled by default because background.js uses a synthetic spread.
         // Enable and lower this threshold only when real order-book spread is available.
         maxSpreadToAtrRatio: Infinity,
-        maxDataLatencyMs: 5e3,
+        maxDataLatencyMs: 6e4,
         maxConsecutiveRejections: 5,
         maxVolatilityRank: 95,
         minSweepQualityWhenSweepPresent: 40,

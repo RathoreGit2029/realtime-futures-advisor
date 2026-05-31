@@ -10,6 +10,15 @@ let socket = null;
 let isConnected = false;
 let activeSymbols = new Set();
 
+function isBinanceUrl(url) {
+  if (!url) return false;
+  return url.includes("binance.com") || 
+         url.includes("binance.me") || 
+         url.includes("binance.info") || 
+         url.includes("binancefuture.com") || 
+         url.includes("binance.us");
+}
+
 let state = {
   settings: {
     timeframe: "5m",
@@ -110,8 +119,7 @@ function connectBackendWebSocket() {
 
       switch (msg.type) {
         case "INIT_STATE":
-          // Backend authoritative stats and settings sync
-          state.settings = msg.state.settings;
+          // Backend authoritative stats and active trades sync (do NOT overwrite client settings from backend)
           state.journalStats = msg.state.journalStats;
           state.sandboxJournalStats = msg.state.sandboxJournalStats;
           state.consecutiveLosses = msg.state.consecutiveLosses;
@@ -120,7 +128,6 @@ function connectBackendWebSocket() {
           state.activeTrades = msg.state.activeTrades;
           
           chrome.storage.local.set({
-            ...state.settings,
             journalStats: state.journalStats,
             sandboxJournalStats: state.sandboxJournalStats,
             consecutiveLosses: state.consecutiveLosses,
@@ -141,6 +148,9 @@ function connectBackendWebSocket() {
 
         case "TAB_STATE_UPDATE":
           const sym = msg.symbol;
+          if (msg.tabState) {
+            msg.tabState.lastUpdated = Date.now(); // override with local host clock time to fix VM clock drift issues
+          }
           symbolData[sym] = msg.tabState;
           chrome.storage.local.set({ ['tabState_' + sym]: msg.tabState });
           broadcastHUDUpdate(sym);
@@ -148,7 +158,7 @@ function connectBackendWebSocket() {
 
         case "SETTINGS_UPDATED":
           state.settings = msg.settings;
-          chrome.storage.local.set({ ...msg.settings });
+          // Do NOT call chrome.storage.local.set here to prevent loop. Client's local storage is already source of truth.
           break;
 
         case "ACTIVE_TRADES_UPDATED":
@@ -237,11 +247,11 @@ function sendToBackend(payload) {
 // 3. Tab Scanning & Subscription Logic
 function scanActiveTabs() {
   chrome.tabs.query({}, (tabs) => {
-    if (chrome.runtime.lastError || !tabs) return;
+    if (chrome.runtime.lastError || !Array.isArray(tabs)) return;
     const currentSymbols = new Set();
     
     for (const tab of tabs) {
-      if (tab.url && tab.url.includes("binance.com") && tab.url.includes("/futures/")) {
+      if (isBinanceUrl(tab.url) && tab.url.includes("/futures/")) {
         const match = tab.url.match(/\/futures\/([A-Z0-9_]+)/i);
         if (match && match[1]) {
           const sym = match[1].toUpperCase();
@@ -355,9 +365,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // HUD overlays helper dispatch methods
 function dispatchAudioEvent(symbol, payload) {
   chrome.tabs.query({}, (tabs) => {
-    if (chrome.runtime.lastError || !tabs) return;
+    if (chrome.runtime.lastError || !Array.isArray(tabs)) return;
     for (const tab of tabs) {
-      if (tab.url && tab.url.includes("binance.com") && tab.url.toLowerCase().includes(symbol.toLowerCase())) {
+      if (tab.url && isBinanceUrl(tab.url) && tab.url.toLowerCase().includes(symbol.toLowerCase())) {
         chrome.tabs.sendMessage(tab.id, { type: "PLAY_AUDIO", payload }).catch(() => {});
       }
     }
@@ -368,9 +378,9 @@ function broadcastHUDUpdate(symbol) {
   const payload = getHUDUpdatePayload(symbol);
   if (!payload) return;
   chrome.tabs.query({}, (tabs) => {
-    if (chrome.runtime.lastError || !tabs) return;
+    if (chrome.runtime.lastError || !Array.isArray(tabs)) return;
     for (const tab of tabs) {
-      if (tab.url && tab.url.includes("binance.com") && tab.url.toLowerCase().includes(symbol.toLowerCase())) {
+      if (tab.url && isBinanceUrl(tab.url) && tab.url.toLowerCase().includes(symbol.toLowerCase())) {
         chrome.tabs.sendMessage(tab.id, { type: "HUD_UPDATE", symbol, payload }).catch(() => {});
       }
     }
@@ -411,9 +421,9 @@ function getHUDUpdatePayload(symbol) {
 chrome.runtime.onInstalled.addListener(() => {
   console.log("🚀 Antigravity SW Client: Extension installed or reloaded. Refreshing active Binance Futures tabs...");
   chrome.tabs.query({}, (tabs) => {
-    if (chrome.runtime.lastError || !tabs) return;
+    if (chrome.runtime.lastError || !Array.isArray(tabs)) return;
     for (const tab of tabs) {
-      if (tab.url && tab.url.includes("binance.com") && tab.url.includes("/futures/")) {
+      if (tab.url && isBinanceUrl(tab.url) && tab.url.includes("/futures/")) {
         console.log(`🔄 Auto-reloading Binance futures tab: ${tab.id} to refresh content script`);
         chrome.tabs.reload(tab.id);
       }

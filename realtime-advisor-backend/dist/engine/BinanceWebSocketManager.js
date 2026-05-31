@@ -51,7 +51,6 @@ class BinanceWebSocketManager {
     clientCallbacks = {}; // symbol -> callbacks
     wsClients = new Set(); // WebSocket client connections (extension clients)
     engine;
-    dbSync;
     isHydrated = false;
     constructor() {
         // Registered on initialization in server.ts
@@ -62,60 +61,95 @@ class BinanceWebSocketManager {
         }
         return BinanceWebSocketManager.instance;
     }
-    init(dbSync) {
-        this.dbSync = dbSync;
+    init() {
         // Initialize deterministic engine
         this.engine = new AntigravityEngine_js_1.AntigravityEngine();
         const logger = EventSourcing_js_1.EventLog.getInstance();
-        // Direct SQLite Event Logging Integration (Write-Ahead Log Synchronicity)
+        // Direct PostgreSQL Event Logging Integration
         logger.registerSyncEventHandler((event) => {
-            const insertEventStmt = this.dbSync.prepare(`
-        INSERT INTO events (
-          sequence_number, exchange_timestamp, receive_timestamp, event_id, correlation_id,
-          type, payload, market_context_snapshot, decision_metadata, event_version,
-          previous_event_hash, deterministic_hash
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-            insertEventStmt.run(event.sequenceNumber, event.exchangeTimestamp, event.receiveTimestamp, event.eventId, event.correlationId, event.type, JSON.stringify(event.payload), event.marketContextSnapshot ? JSON.stringify(event.marketContextSnapshot) : null, event.decisionMetadata ? JSON.stringify(event.decisionMetadata) : null, event.eventVersion, event.previousEventHash || null, event.deterministicHash);
+            index_js_1.db.insert(schema_js_1.advisorEvents)
+                .values({
+                sequenceNumber: event.sequenceNumber,
+                exchangeTimestamp: event.exchangeTimestamp,
+                receiveTimestamp: event.receiveTimestamp,
+                eventId: event.eventId,
+                correlationId: event.correlationId,
+                type: event.type,
+                payload: JSON.stringify(event.payload),
+                marketContextSnapshot: event.marketContextSnapshot ? JSON.stringify(event.marketContextSnapshot) : null,
+                decisionMetadata: event.decisionMetadata ? JSON.stringify(event.decisionMetadata) : null,
+                eventVersion: event.eventVersion,
+                previousEventHash: event.previousEventHash || null,
+                deterministicHash: event.deterministicHash
+            })
+                .execute()
+                .catch(err => {
+                console.error(`[Event Store] Direct event sync failed:`, err);
+            });
         });
         logger.registerSyncSnapshotHandler((sequenceNumber, stateData) => {
-            const insertSnapshotStmt = this.dbSync.prepare(`
-        INSERT OR REPLACE INTO snapshots (sequence_number, state_data, timestamp)
-        VALUES (?, ?, ?)
-      `);
-            insertSnapshotStmt.run(sequenceNumber, JSON.stringify(stateData), Date.now());
+            index_js_1.db.insert(schema_js_1.advisorSnapshots)
+                .values({
+                sequenceNumber,
+                stateData: JSON.stringify(stateData),
+                timestamp: Date.now()
+            })
+                .onConflictDoUpdate({
+                target: schema_js_1.advisorSnapshots.sequenceNumber,
+                set: {
+                    stateData: JSON.stringify(stateData),
+                    timestamp: Date.now()
+                }
+            })
+                .execute()
+                .catch(err => {
+                console.error(`[Event Store] Direct snapshot sync failed:`, err);
+            });
         });
         logger.registerHydrationHandler(async () => {
             // 1. Fetch latest snapshot
-            const latestSnapshotStmt = this.dbSync.prepare("SELECT * FROM snapshots ORDER BY sequence_number DESC LIMIT 1");
-            const snapshot = latestSnapshotStmt.get();
+            const snapshots = await index_js_1.db.select()
+                .from(schema_js_1.advisorSnapshots)
+                .orderBy((0, drizzle_orm_1.desc)(schema_js_1.advisorSnapshots.sequenceNumber))
+                .limit(1)
+                .execute();
+            const snapshot = snapshots[0];
             let startSeq = 0;
             let snapshotState = null;
             if (snapshot) {
-                startSeq = snapshot.sequence_number + 1;
-                snapshotState = JSON.parse(snapshot.state_data);
+                startSeq = snapshot.sequenceNumber + 1;
+                snapshotState = JSON.parse(snapshot.stateData);
             }
             // 2. Fetch subsequent events
-            const getEventsStmt = this.dbSync.prepare("SELECT * FROM events WHERE sequence_number >= ? ORDER BY sequence_number ASC");
-            const events = getEventsStmt.all(startSeq);
+            const events = await index_js_1.db.select()
+                .from(schema_js_1.advisorEvents)
+                .where((0, drizzle_orm_1.sql) `${schema_js_1.advisorEvents.sequenceNumber} >= ${startSeq}`)
+                .orderBy(schema_js_1.advisorEvents.sequenceNumber)
+                .execute();
             const parsedEvents = events.map(e => ({
-                sequenceNumber: e.sequence_number,
-                exchangeTimestamp: e.exchange_timestamp,
-                receiveTimestamp: e.receive_timestamp,
-                eventId: e.event_id,
-                correlationId: e.correlation_id,
+                sequenceNumber: e.sequenceNumber,
+                exchangeTimestamp: e.exchangeTimestamp,
+                receiveTimestamp: e.receiveTimestamp,
+                eventId: e.eventId,
+                correlationId: e.correlationId,
                 type: e.type,
                 payload: JSON.parse(e.payload),
-                marketContextSnapshot: e.market_context_snapshot ? JSON.parse(e.market_context_snapshot) : undefined,
-                decisionMetadata: e.decision_metadata ? JSON.parse(e.decision_metadata) : undefined,
-                eventVersion: e.event_version,
-                previousEventHash: e.previous_event_hash || undefined,
-                deterministicHash: e.deterministic_hash
+                marketContextSnapshot: e.marketContextSnapshot ? JSON.parse(e.marketContextSnapshot) : undefined,
+                decisionMetadata: e.decisionMetadata ? JSON.parse(e.decisionMetadata) : undefined,
+                eventVersion: e.eventVersion,
+                previousEventHash: e.previousEventHash || undefined,
+                deterministicHash: e.deterministicHash
             }));
-            // Find absolute maximum sequence number in the SQLite store
-            const maxEvents = this.dbSync.prepare("SELECT MAX(sequence_number) as m FROM events").get();
-            const maxSnapshots = this.dbSync.prepare("SELECT MAX(sequence_number) as m FROM snapshots").get();
-            const maxSeq = Math.max(maxEvents && maxEvents.m !== null ? maxEvents.m : -1, maxSnapshots && maxSnapshots.m !== null ? maxSnapshots.m : -1);
+            // Find absolute maximum sequence number in PostgreSQL
+            const maxEventsRes = await index_js_1.db.select({ maxSeq: (0, drizzle_orm_1.sql) `MAX(${schema_js_1.advisorEvents.sequenceNumber})` })
+                .from(schema_js_1.advisorEvents)
+                .execute();
+            const maxSnapshotsRes = await index_js_1.db.select({ maxSeq: (0, drizzle_orm_1.sql) `MAX(${schema_js_1.advisorSnapshots.sequenceNumber})` })
+                .from(schema_js_1.advisorSnapshots)
+                .execute();
+            const maxEventSeq = maxEventsRes[0]?.maxSeq !== null && maxEventsRes[0]?.maxSeq !== undefined ? Number(maxEventsRes[0].maxSeq) : -1;
+            const maxSnapshotSeq = maxSnapshotsRes[0]?.maxSeq !== null && maxSnapshotsRes[0]?.maxSeq !== undefined ? Number(maxSnapshotsRes[0].maxSeq) : -1;
+            const maxSeq = Math.max(maxEventSeq, maxSnapshotSeq);
             return { events: parsedEvents, snapshotState, latestSequenceNumber: maxSeq };
         });
         // Register state getters and restorers
@@ -134,7 +168,7 @@ class BinanceWebSocketManager {
                 return;
             if (snapshotState.probabilityState) {
                 this.engine.probEngine.deserializeState(snapshotState.probabilityState);
-                console.log('⚡ Event Sourcing: Bayesian probability restored from SQLite snapshot.');
+                console.log('⚡ Event Sourcing: Bayesian probability restored from PostgreSQL snapshot.');
             }
             if (snapshotState.journalStats)
                 this.state.journalStats = snapshotState.journalStats;
@@ -146,7 +180,7 @@ class BinanceWebSocketManager {
                 this.state.walletBalance = snapshotState.walletBalance;
             if (snapshotState.sandboxWalletBalance !== undefined)
                 this.state.sandboxWalletBalance = snapshotState.sandboxWalletBalance;
-            console.log('💾 Event Sourcing: State restored from SQLite snapshot.');
+            console.log('💾 Event Sourcing: State restored from PostgreSQL snapshot.');
         });
         // Hydrate state
         logger.hydrate()

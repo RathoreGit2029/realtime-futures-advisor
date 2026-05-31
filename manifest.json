@@ -10,6 +10,10 @@
   ],
   "host_permissions": [
     "https://*.binance.com/*",
+    "https://*.binance.me/*",
+    "https://*.binance.info/*",
+    "https://*.binancefuture.com/*",
+    "https://*.binance.us/*",
     "https://fapi.binance.com/*",
     "https://api.binance.com/*",
     "https://data-api.binance.vision/*",
@@ -27,7 +31,18 @@
       "matches": [
         "https://*.binance.com/en/futures/*",
         "https://*.binance.com/zh-CN/futures/*",
-        "https://*.binance.com/futures/*"
+        "https://*.binance.com/futures/*",
+        "https://*.binance.me/en/futures/*",
+        "https://*.binance.me/zh-CN/futures/*",
+        "https://*.binance.me/futures/*",
+        "https://*.binance.info/en/futures/*",
+        "https://*.binance.info/zh-CN/futures/*",
+        "https://*.binance.info/futures/*",
+        "https://*.binancefuture.com/en/futures/*",
+        "https://*.binancefuture.com/zh-CN/futures/*",
+        "https://*.binancefuture.com/futures/*",
+        "https://*.binance.us/en/futures/*",
+        "https://*.binance.us/futures/*"
       ],
       "js": ["content.js"],
       "css": ["hud.css"],

@@ -9,40 +9,13 @@ const websocket_1 = __importDefault(require("@fastify/websocket"));
 const index_js_1 = require("./db/index.js");
 const schema_js_1 = require("./db/schema.js");
 const drizzle_orm_1 = require("drizzle-orm");
-const node_sqlite_1 = require("node:sqlite");
 const BinanceWebSocketManager_js_1 = require("./engine/BinanceWebSocketManager.js");
 const fastify = (0, fastify_1.default)({ logger: true });
 fastify.register(cors_1.default, { origin: '*' });
 fastify.register(websocket_1.default);
-// --- Authoritative SQLite Event Log Setup ---
-const dbSync = new node_sqlite_1.DatabaseSync('events.db');
-dbSync.exec("PRAGMA journal_mode = WAL;");
-dbSync.exec(`
-  CREATE TABLE IF NOT EXISTS events (
-    sequence_number INTEGER PRIMARY KEY,
-    exchange_timestamp INTEGER NOT NULL,
-    receive_timestamp INTEGER NOT NULL,
-    event_id TEXT NOT NULL,
-    correlation_id TEXT NOT NULL,
-    type TEXT NOT NULL,
-    payload TEXT NOT NULL,
-    market_context_snapshot TEXT,
-    decision_metadata TEXT,
-    event_version INTEGER NOT NULL,
-    previous_event_hash TEXT,
-    deterministic_hash TEXT NOT NULL
-  );
-`);
-dbSync.exec(`
-  CREATE TABLE IF NOT EXISTS snapshots (
-    sequence_number INTEGER PRIMARY KEY,
-    state_data TEXT NOT NULL,
-    timestamp INTEGER NOT NULL
-  );
-`);
 // Initialize execution manager
 const manager = BinanceWebSocketManager_js_1.BinanceWebSocketManager.getInstance();
-manager.init(dbSync);
+manager.init();
 // WebSocket real-time client route
 fastify.register(async function (fastify) {
     fastify.get('/ws', { websocket: true }, (connection, req) => {
@@ -79,25 +52,28 @@ fastify.get('/health', async () => ({
     status: 'OK',
     timestamp: new Date().toISOString()
 }));
-// --- SQLite Event Sourcing Endpoints ---
+// --- PostgreSQL Event Sourcing Endpoints ---
 fastify.get('/api/advisor/events', async (req, reply) => {
     try {
         const fromSequence = Number(req.query.fromSequence || 0);
-        const getEventsStmt = dbSync.prepare("SELECT * FROM events WHERE sequence_number >= ? ORDER BY sequence_number ASC");
-        const events = getEventsStmt.all(fromSequence);
+        const events = await index_js_1.db.select()
+            .from(schema_js_1.advisorEvents)
+            .where((0, drizzle_orm_1.sql) `${schema_js_1.advisorEvents.sequenceNumber} >= ${fromSequence}`)
+            .orderBy(schema_js_1.advisorEvents.sequenceNumber)
+            .execute();
         const parsedEvents = events.map((e) => ({
-            sequenceNumber: e.sequence_number,
-            exchangeTimestamp: e.exchange_timestamp,
-            receiveTimestamp: e.receive_timestamp,
-            eventId: e.event_id,
-            correlationId: e.correlation_id,
+            sequenceNumber: e.sequenceNumber,
+            exchangeTimestamp: e.exchangeTimestamp,
+            receiveTimestamp: e.receiveTimestamp,
+            eventId: e.eventId,
+            correlationId: e.correlationId,
             type: e.type,
             payload: JSON.parse(e.payload),
-            marketContextSnapshot: e.market_context_snapshot ? JSON.parse(e.market_context_snapshot) : undefined,
-            decisionMetadata: e.decision_metadata ? JSON.parse(e.decision_metadata) : undefined,
-            eventVersion: e.event_version,
-            previousEventHash: e.previous_event_hash || undefined,
-            deterministicHash: e.deterministic_hash
+            marketContextSnapshot: e.marketContextSnapshot ? JSON.parse(e.marketContextSnapshot) : undefined,
+            decisionMetadata: e.decisionMetadata ? JSON.parse(e.decisionMetadata) : undefined,
+            eventVersion: e.eventVersion,
+            previousEventHash: e.previousEventHash || undefined,
+            deterministicHash: e.deterministicHash
         }));
         return parsedEvents;
     }
@@ -112,41 +88,58 @@ fastify.post('/api/advisor/events', async (req, reply) => {
         if (!event || typeof event.sequenceNumber !== 'number') {
             return reply.status(400).send({ error: 'Invalid event format' });
         }
-        // Sequence checking gate
-        const maxSeqStmt = dbSync.prepare("SELECT MAX(sequence_number) as maxSeq FROM events");
-        const result = maxSeqStmt.get();
-        const maxSeq = result?.maxSeq !== null ? result.maxSeq : -1;
-        const expectedSeq = maxSeq + 1;
-        if (event.sequenceNumber !== expectedSeq) {
-            return reply.status(409).send({
-                error: `Sequence mismatch. Expected: ${expectedSeq}, Received: ${event.sequenceNumber}`
-            });
-        }
-        // Cryptographic hash continuity check
-        if (maxSeq >= 0) {
-            const lastEventStmt = dbSync.prepare("SELECT deterministic_hash FROM events WHERE sequence_number = ?");
-            const lastEvent = lastEventStmt.get(maxSeq);
-            const lastHash = lastEvent?.deterministic_hash || '';
-            if (event.previousEventHash !== lastHash) {
-                return reply.status(409).send({
-                    error: `Hash link broken. Expected previous hash: ${lastHash}, Received: ${event.previousEventHash}`
-                });
+        const result = await index_js_1.db.transaction(async (tx) => {
+            // Sequence checking gate
+            const maxSeqRes = await tx.select({ maxSeq: (0, drizzle_orm_1.sql) `MAX(${schema_js_1.advisorEvents.sequenceNumber})` })
+                .from(schema_js_1.advisorEvents)
+                .execute();
+            const maxSeq = maxSeqRes[0]?.maxSeq !== null && maxSeqRes[0]?.maxSeq !== undefined ? Number(maxSeqRes[0].maxSeq) : -1;
+            const expectedSeq = maxSeq + 1;
+            if (event.sequenceNumber !== expectedSeq) {
+                return {
+                    errorStatus: 409,
+                    errorMsg: `Sequence mismatch. Expected: ${expectedSeq}, Received: ${event.sequenceNumber}`
+                };
             }
+            // Cryptographic hash continuity check
+            if (maxSeq >= 0) {
+                const lastEvent = await tx.select({ deterministicHash: schema_js_1.advisorEvents.deterministicHash })
+                    .from(schema_js_1.advisorEvents)
+                    .where((0, drizzle_orm_1.eq)(schema_js_1.advisorEvents.sequenceNumber, maxSeq))
+                    .execute();
+                const lastHash = lastEvent[0]?.deterministicHash || '';
+                if (event.previousEventHash !== lastHash) {
+                    return {
+                        errorStatus: 409,
+                        errorMsg: `Hash link broken. Expected previous hash: ${lastHash}, Received: ${event.previousEventHash}`
+                    };
+                }
+            }
+            // Insert
+            await tx.insert(schema_js_1.advisorEvents).values({
+                sequenceNumber: event.sequenceNumber,
+                exchangeTimestamp: event.exchangeTimestamp,
+                receiveTimestamp: event.receiveTimestamp,
+                eventId: event.eventId,
+                correlationId: event.correlationId,
+                type: event.type,
+                payload: JSON.stringify(event.payload),
+                marketContextSnapshot: event.marketContextSnapshot ? JSON.stringify(event.marketContextSnapshot) : null,
+                decisionMetadata: event.decisionMetadata ? JSON.stringify(event.decisionMetadata) : null,
+                eventVersion: event.eventVersion,
+                previousEventHash: event.previousEventHash || null,
+                deterministicHash: event.deterministicHash
+            }).execute();
+            return { success: true };
+        });
+        if (result.errorStatus) {
+            return reply.status(result.errorStatus).send({ error: result.errorMsg });
         }
-        // Insert
-        const insertEventStmt = dbSync.prepare(`
-      INSERT INTO events (
-        sequence_number, exchange_timestamp, receive_timestamp, event_id, correlation_id,
-        type, payload, market_context_snapshot, decision_metadata, event_version,
-        previous_event_hash, deterministic_hash
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-        insertEventStmt.run(event.sequenceNumber, event.exchangeTimestamp, event.receiveTimestamp, event.eventId, event.correlationId, event.type, JSON.stringify(event.payload), event.marketContextSnapshot ? JSON.stringify(event.marketContextSnapshot) : null, event.decisionMetadata ? JSON.stringify(event.decisionMetadata) : null, event.eventVersion, event.previousEventHash || null, event.deterministicHash);
         return { success: true, sequenceNumber: event.sequenceNumber };
     }
     catch (err) {
         fastify.log.error(err);
-        reply.status(500).send({ error: 'Failed to append event to SQLite store' });
+        reply.status(500).send({ error: 'Failed to append event to PostgreSQL store' });
     }
 });
 fastify.post('/api/advisor/snapshots', async (req, reply) => {
@@ -155,11 +148,20 @@ fastify.post('/api/advisor/snapshots', async (req, reply) => {
         if (typeof sequenceNumber !== 'number' || !stateData) {
             return reply.status(400).send({ error: 'Invalid snapshot format' });
         }
-        const insertSnapshotStmt = dbSync.prepare(`
-      INSERT OR REPLACE INTO snapshots (sequence_number, state_data, timestamp)
-      VALUES (?, ?, ?)
-    `);
-        insertSnapshotStmt.run(sequenceNumber, JSON.stringify(stateData), timestamp || Date.now());
+        await index_js_1.db.insert(schema_js_1.advisorSnapshots)
+            .values({
+            sequenceNumber,
+            stateData: JSON.stringify(stateData),
+            timestamp: timestamp || Date.now()
+        })
+            .onConflictDoUpdate({
+            target: schema_js_1.advisorSnapshots.sequenceNumber,
+            set: {
+                stateData: JSON.stringify(stateData),
+                timestamp: timestamp || Date.now()
+            }
+        })
+            .execute();
         return { success: true, sequenceNumber };
     }
     catch (err) {
@@ -169,14 +171,18 @@ fastify.post('/api/advisor/snapshots', async (req, reply) => {
 });
 fastify.get('/api/advisor/snapshots/latest', async (_req, reply) => {
     try {
-        const latestSnapshotStmt = dbSync.prepare("SELECT * FROM snapshots ORDER BY sequence_number DESC LIMIT 1");
-        const snapshot = latestSnapshotStmt.get();
+        const snapshots = await index_js_1.db.select()
+            .from(schema_js_1.advisorSnapshots)
+            .orderBy((0, drizzle_orm_1.desc)(schema_js_1.advisorSnapshots.sequenceNumber))
+            .limit(1)
+            .execute();
+        const snapshot = snapshots[0];
         if (!snapshot) {
             return null;
         }
         return {
-            sequenceNumber: snapshot.sequence_number,
-            stateData: JSON.parse(snapshot.state_data),
+            sequenceNumber: snapshot.sequenceNumber,
+            stateData: JSON.parse(snapshot.stateData),
             timestamp: snapshot.timestamp
         };
     }
