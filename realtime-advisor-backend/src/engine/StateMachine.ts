@@ -23,20 +23,24 @@ const VALID_TRANSITIONS: Record<MarketState, Set<MarketState>> = {
     MarketState.ACCUMULATION,
     MarketState.LIQUIDITY_SWEEP,
     MarketState.DISPLACEMENT,
-    MarketState.EXECUTION_WINDOW
+    MarketState.EXECUTION_WINDOW,
+    MarketState.RETRACEMENT
   ]),
   [MarketState.DISPLACEMENT]: new Set([
     MarketState.NO_TRADE,
     MarketState.ACCUMULATION,
     MarketState.DISPLACEMENT,
     MarketState.RETRACEMENT,
-    MarketState.EXECUTION_WINDOW
+    MarketState.EXECUTION_WINDOW,
+    MarketState.LIQUIDITY_SWEEP
   ]),
   [MarketState.RETRACEMENT]: new Set([
     MarketState.NO_TRADE,
     MarketState.ACCUMULATION,
     MarketState.RETRACEMENT,
-    MarketState.EXECUTION_WINDOW
+    MarketState.EXECUTION_WINDOW,
+    MarketState.LIQUIDITY_SWEEP,
+    MarketState.DISPLACEMENT
   ]),
   [MarketState.EXECUTION_WINDOW]: new Set([
     MarketState.NO_TRADE,

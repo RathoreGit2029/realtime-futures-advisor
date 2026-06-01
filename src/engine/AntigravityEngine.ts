@@ -80,7 +80,12 @@ export class AntigravityEngine {
     // Step 3.5 — Run State Machine transitions & override state
     const hasActivePosition = !!rawContext.positionActive;
     const nextState = this.stateMachine.determineNextState(context, hasActivePosition);
-    this.stateMachine.transitionTo(context.symbol, nextState, `Market evaluation tick for ${context.symbol}`);
+    try {
+      this.stateMachine.transitionTo(context.symbol, nextState, `Market evaluation tick for ${context.symbol}`);
+    } catch (e: any) {
+      console.warn(`[FSM] Handled state violation for ${context.symbol}: ${e.message}`);
+      this.stateMachine.forceState(context.symbol, nextState);
+    }
     const validatedState = this.stateMachine.getCurrentState(context.symbol);
 
     context = createMarketContext({

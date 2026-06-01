@@ -940,20 +940,24 @@ var AntigravityCore = (() => {
       "ACCUMULATION" /* ACCUMULATION */,
       "LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */,
       "DISPLACEMENT" /* DISPLACEMENT */,
-      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */
+      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */,
+      "RETRACEMENT" /* RETRACEMENT */
     ]),
     ["DISPLACEMENT" /* DISPLACEMENT */]: /* @__PURE__ */ new Set([
       "NO_TRADE" /* NO_TRADE */,
       "ACCUMULATION" /* ACCUMULATION */,
       "DISPLACEMENT" /* DISPLACEMENT */,
       "RETRACEMENT" /* RETRACEMENT */,
-      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */
+      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */,
+      "LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */
     ]),
     ["RETRACEMENT" /* RETRACEMENT */]: /* @__PURE__ */ new Set([
       "NO_TRADE" /* NO_TRADE */,
       "ACCUMULATION" /* ACCUMULATION */,
       "RETRACEMENT" /* RETRACEMENT */,
-      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */
+      "EXECUTION_WINDOW" /* EXECUTION_WINDOW */,
+      "LIQUIDITY_SWEEP" /* LIQUIDITY_SWEEP */,
+      "DISPLACEMENT" /* DISPLACEMENT */
     ]),
     ["EXECUTION_WINDOW" /* EXECUTION_WINDOW */]: /* @__PURE__ */ new Set([
       "NO_TRADE" /* NO_TRADE */,
@@ -1409,7 +1413,12 @@ var AntigravityCore = (() => {
       });
       const hasActivePosition = !!rawContext.positionActive;
       const nextState = this.stateMachine.determineNextState(context, hasActivePosition);
-      this.stateMachine.transitionTo(context.symbol, nextState, `Market evaluation tick for ${context.symbol}`);
+      try {
+        this.stateMachine.transitionTo(context.symbol, nextState, `Market evaluation tick for ${context.symbol}`);
+      } catch (e) {
+        console.warn(`[FSM] Handled state violation for ${context.symbol}: ${e.message}`);
+        this.stateMachine.forceState(context.symbol, nextState);
+      }
       const validatedState = this.stateMachine.getCurrentState(context.symbol);
       context = createMarketContext({
         ...rawContext,
