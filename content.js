@@ -520,6 +520,74 @@
       
       svgEl.appendChild(labelGroup);
     }
+
+    // 8. Draw Linear Regression Trend Line
+    let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+    const n = subset.length;
+    subset.forEach((c, idx) => {
+      sumX += idx;
+      sumY += c.close;
+      sumXY += idx * c.close;
+      sumXX += idx * idx;
+    });
+    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+    const intercept = (sumY - slope * sumX) / n;
+    const yStartVal = intercept;
+    const yEndVal = slope * (n - 1) + intercept;
+
+    const trendLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    trendLine.setAttribute("x1", getX(0));
+    trendLine.setAttribute("y1", getY(yStartVal));
+    trendLine.setAttribute("x2", getX(n - 1));
+    trendLine.setAttribute("y2", getY(yEndVal));
+    trendLine.setAttribute("stroke", slope >= 0 ? "rgba(46, 189, 133, 0.6)" : "rgba(246, 70, 93, 0.6)");
+    trendLine.setAttribute("stroke-width", "1.5");
+    trendLine.setAttribute("stroke-dasharray", "4,3");
+    svgEl.appendChild(trendLine);
+
+    // 9. Draw Highest High / Lowest Low Labels
+    let highestIdx = 0;
+    let lowestIdx = 0;
+    subset.forEach((c, idx) => {
+      if (c.high > subset[highestIdx].high) highestIdx = idx;
+      if (c.low < subset[lowestIdx].low) lowestIdx = idx;
+    });
+
+    // Highest High label
+    const hDot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    hDot.setAttribute("cx", getX(highestIdx));
+    hDot.setAttribute("cy", getY(subset[highestIdx].high));
+    hDot.setAttribute("r", "2");
+    hDot.setAttribute("fill", "#f6465d");
+    svgEl.appendChild(hDot);
+
+    const hText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    hText.setAttribute("x", getX(highestIdx));
+    hText.setAttribute("y", getY(subset[highestIdx].high) - 5);
+    hText.setAttribute("fill", "#f6465d");
+    hText.setAttribute("font-size", "7px");
+    hText.setAttribute("font-weight", "bold");
+    hText.setAttribute("text-anchor", "middle");
+    hText.textContent = "H";
+    svgEl.appendChild(hText);
+
+    // Lowest Low label
+    const lDot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    lDot.setAttribute("cx", getX(lowestIdx));
+    lDot.setAttribute("cy", getY(subset[lowestIdx].low));
+    lDot.setAttribute("r", "2");
+    lDot.setAttribute("fill", "#2ebd85");
+    svgEl.appendChild(lDot);
+
+    const lText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    lText.setAttribute("x", getX(lowestIdx));
+    lText.setAttribute("y", getY(subset[lowestIdx].low) + 9);
+    lText.setAttribute("fill", "#2ebd85");
+    lText.setAttribute("font-size", "7px");
+    lText.setAttribute("font-weight", "bold");
+    lText.setAttribute("text-anchor", "middle");
+    lText.textContent = "L";
+    svgEl.appendChild(lText);
   }
 
   function formatPrice(val) {
@@ -563,6 +631,12 @@
           // Trigger reflow
           el.offsetHeight;
           el.classList.add("active");
+          if (p === "chart") {
+            const svgEl = document.getElementById("agy-svg-chart");
+            if (svgEl && candles && candles.length >= 5) {
+              renderMiniSVGChart(svgEl, candles, currentSignal);
+            }
+          }
         } else {
           el.style.display = "none";
           el.classList.remove("active");
@@ -766,6 +840,20 @@
     document.getElementById("agy-btn-dashboard").addEventListener("click", () => {
       chrome.runtime.sendMessage({ type: "OPEN_DASHBOARD" });
     });
+
+    const chartContainer = document.getElementById("agy-chart-container");
+    const svgEl = document.getElementById("agy-svg-chart");
+    if (chartContainer && svgEl) {
+      chartContainer.style.cursor = "pointer";
+      chartContainer.title = "Click to Expand/Collapse Chart";
+      chartContainer.addEventListener("click", () => {
+        const isExpanded = svgEl.style.height === "240px" || svgEl.style.height === "240px !important";
+        svgEl.style.setProperty("height", isExpanded ? "120px" : "240px", "important");
+        if (candles && candles.length >= 5) {
+          renderMiniSVGChart(svgEl, candles, currentSignal);
+        }
+      });
+    }
 
     hudRoot.addEventListener("click", (e) => {
       if (e.target && e.target.id === "agy-btn-action-taken") {
