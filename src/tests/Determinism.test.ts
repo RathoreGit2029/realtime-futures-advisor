@@ -25,7 +25,7 @@ const makeRawCtx = (overrides: Partial<RawMarketInput> = {}): RawMarketInput => 
   liquidityState: {
     hasSweep: true,
     sweepQuality: 80,
-    recentSweepDirection: 'BULLISH'
+    recentSweepDirection: 'BEARISH'
   },
   trendState: {
     direction: 'UP',

@@ -26,14 +26,14 @@ export class LiquidityConstraint implements Constraint {
       
       // Ensure sweep direction opposes the intended trade direction (sweep retail longs to go long)
       const intendedTradeDirection = trendState.direction; 
-      if (intendedTradeDirection === 'UP' && liquidityState.recentSweepDirection === 'BEARISH') {
+      if (intendedTradeDirection === 'UP' && liquidityState.recentSweepDirection === 'BULLISH') {
          return {
           passed: false,
           confidenceImpact: 0,
           reason: 'Sweep direction opposes logical entry. Swept highs, but looking for longs.'
         };
       }
-      if (intendedTradeDirection === 'DOWN' && liquidityState.recentSweepDirection === 'BULLISH') {
+      if (intendedTradeDirection === 'DOWN' && liquidityState.recentSweepDirection === 'BEARISH') {
          return {
           passed: false,
           confidenceImpact: 0,

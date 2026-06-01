@@ -34,7 +34,7 @@ describe('Constraint DAG Unit Tests', () => {
       liquidityState: {
         hasSweep: true,
         sweepQuality: 85,
-        recentSweepDirection: 'BULLISH'
+        recentSweepDirection: 'BEARISH'
       },
       trendState: {
         direction: 'UP',
