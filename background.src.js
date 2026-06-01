@@ -349,6 +349,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
   }
 
+  if (request.type === "FETCH_PROXY") {
+    fetch(request.url, request.options || {})
+      .then(r => {
+        const contentType = r.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          return r.json().then(data => ({ status: r.status, data }));
+        } else {
+          return r.text().then(text => ({ status: r.status, text }));
+        }
+      })
+      .then(result => {
+        sendResponse({ success: true, ...result });
+      })
+      .catch(err => {
+        sendResponse({ success: false, error: err.message });
+      });
+    return true; // async
+  }
+
   if (request.type === "MANUAL_CLOSE_TRADE") {
     sendToBackend({ type: "MANUAL_CLOSE_TRADE", symbol: request.symbol });
     sendResponse({ success: true });

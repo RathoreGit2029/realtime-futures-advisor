@@ -225,6 +225,69 @@
 
     /* ── Divider ── */
     .divider { height: 1px; background: var(--border); margin: 2px 0 10px; }
+
+    /* Navigation Tabs Bar */
+    .agy-tabs-nav {
+      display: flex !important;
+      background: rgba(30, 35, 41, 0.4) !important;
+      border-bottom: 1px solid var(--border) !important;
+      position: relative !important;
+      width: 100% !important;
+      margin-bottom: 12px !important;
+      border-radius: 6px !important;
+      overflow: hidden !important;
+    }
+
+    .agy-tab-btn {
+      flex: 1 !important;
+      background: transparent !important;
+      border: none !important;
+      color: var(--text-muted) !important;
+      padding: 10px 0 !important;
+      font-size: 11px !important;
+      font-weight: 800 !important;
+      text-align: center !important;
+      cursor: pointer !important;
+      transition: color 0.25s ease !important;
+      position: relative !important;
+      text-transform: uppercase !important;
+      letter-spacing: 0.5px !important;
+      font-family: inherit !important;
+    }
+
+    .agy-tab-btn:hover {
+      color: #fff !important;
+    }
+
+    .agy-tab-btn.active {
+      color: var(--accent) !important;
+    }
+
+    /* Sliding active indicator line */
+    .agy-tabs-nav::after {
+      content: "" !important;
+      position: absolute !important;
+      bottom: 0 !important;
+      left: var(--agy-tab-left, 0%) !important;
+      width: 33.333% !important;
+      height: 2px !important;
+      background: var(--accent) !important;
+      box-shadow: 0 0 8px var(--accent) !important;
+      transition: left 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+
+    /* Tab Panels Transitions */
+    .agy-tab-content {
+      display: none;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+
+    .agy-tab-content.active {
+      opacity: 1;
+      transform: translateY(0);
+    }
   </style>
 </head>
 <body>
@@ -242,294 +305,312 @@
     </div>
   </div>
 
-  <!-- ── Active Trade Panel (shown only when trade is live) ── -->
-  <div id="activeTradePanelWrap">
-    <div class="active-trade-panel" id="activeTradePanel">
-      <div class="atp-header">
-        <span class="atp-badge long" id="atpBadge">LONG</span>
-        <span class="atp-title" id="atpSymbol">BTCUSDT</span>
-        <span class="atp-mode" id="atpMode">MONITORING</span>
+  <div class="agy-tabs-nav">
+    <button class="agy-tab-btn active" data-tab="setup">🎯 SETUP</button>
+    <button class="agy-tab-btn" data-tab="metrics">📊 METRICS</button>
+    <button class="agy-tab-btn" data-tab="config">⚙️ CONFIG</button>
+  </div>
+
+  <!-- TAB 1: SETUP -->
+  <div id="agy-tab-content-setup" class="agy-tab-content active" style="display: block;">
+    <!-- ── Active Trade Panel (shown only when trade is live) ── -->
+    <div id="activeTradePanelWrap">
+      <div class="active-trade-panel" id="activeTradePanel">
+        <div class="atp-header">
+          <span class="atp-badge long" id="atpBadge">LONG</span>
+          <span class="atp-title" id="atpSymbol">BTCUSDT</span>
+          <span class="atp-mode" id="atpMode">MONITORING</span>
+        </div>
+        <div class="atp-grid">
+          <div class="atp-cell">
+            <div class="atp-label">Entry</div>
+            <div class="atp-val" id="atpEntry">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Mark Price</div>
+            <div class="atp-val" style="color: var(--accent);" id="atpMarkPrice">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Target (TP1)</div>
+            <div class="atp-val" style="color: var(--green);" id="atpTarget">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Stop Loss</div>
+            <div class="atp-val" style="color: var(--red);" id="atpStop">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Position Size</div>
+            <div class="atp-val" id="atpSize">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Age (Candles)</div>
+            <div class="atp-val" id="atpAge">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Margin Ratio (%)</div>
+            <div class="atp-val" id="atpMarginRatio">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Liq. Price ($)</div>
+            <div class="atp-val" id="atpLiqPrice">—</div>
+          </div>
+        </div>
+        <div class="pnl-row">
+          <span class="pnl-label">Unrealized PnL</span>
+          <span class="pnl-val" id="atpPnl">Waiting for tick...</span>
+        </div>
       </div>
-      <div class="atp-grid">
-        <div class="atp-cell">
-          <div class="atp-label">Entry</div>
-          <div class="atp-val" id="atpEntry">—</div>
+    </div>
+
+    <!-- ── Prospective Setup Recommendation Panel (shown when scanning and no active trade) ── -->
+    <div id="recommendationPanelWrap" style="display: none;">
+      <div class="active-trade-panel" id="recommendationPanel" style="border-color: var(--border); background: linear-gradient(135deg, rgba(240,185,11,0.08), rgba(11,14,17,0)); transition: all 0.3s ease;">
+        <div class="atp-header">
+          <span class="atp-badge long" id="recBadge" style="background: rgba(240,185,11,0.15); color: var(--accent); border: 1px solid rgba(240,185,11,0.3);">WAITING</span>
+          <span class="atp-title" id="recSymbol">BTCUSDT</span>
+          <span class="atp-mode" id="recMode">HUNTING</span>
         </div>
-        <div class="atp-cell">
-          <div class="atp-label">Mark Price</div>
-          <div class="atp-val" style="color: var(--accent);" id="atpMarkPrice">—</div>
+        <div class="atp-grid">
+          <div class="atp-cell" style="grid-column: span 2;">
+            <div class="atp-label">Pattern</div>
+            <div class="atp-val" id="recPattern" style="font-size: 11px;">Scanning Range</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Probability</div>
+            <div class="atp-val" id="recProbability">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Displacement</div>
+            <div class="atp-val" id="recDisplacement">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Est. Entry</div>
+            <div class="atp-val" id="recEntry">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Target (TP1)</div>
+            <div class="atp-val" style="color: var(--green);" id="recTarget">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Stop Loss</div>
+            <div class="atp-val" style="color: var(--red);" id="recStop">—</div>
+          </div>
+          <div class="atp-cell">
+            <div class="atp-label">Dealing Range</div>
+            <div class="atp-val" id="recDealingRange" style="font-size: 10px;">—</div>
+          </div>
+          <div class="atp-cell" style="grid-column: span 2;">
+            <div class="atp-label">FVG Zone</div>
+            <div class="atp-val" id="recFvg" style="font-size: 10px;">—</div>
+          </div>
         </div>
-        <div class="atp-cell">
-          <div class="atp-label">Target (TP1)</div>
-          <div class="atp-val" style="color: var(--green);" id="atpTarget">—</div>
-        </div>
-        <div class="atp-cell">
-          <div class="atp-label">Stop Loss</div>
-          <div class="atp-val" style="color: var(--red);" id="atpStop">—</div>
-        </div>
-        <div class="atp-cell">
-          <div class="atp-label">Position Size</div>
-          <div class="atp-val" id="atpSize">—</div>
-        </div>
-        <div class="atp-cell">
-          <div class="atp-label">Age (Candles)</div>
-          <div class="atp-val" id="atpAge">—</div>
-        </div>
-        <div class="atp-cell">
-          <div class="atp-label">Margin Ratio (%)</div>
-          <div class="atp-val" id="atpMarginRatio">—</div>
-        </div>
-        <div class="atp-cell">
-          <div class="atp-label">Liq. Price ($)</div>
-          <div class="atp-val" id="atpLiqPrice">—</div>
+        <div class="pnl-row" style="margin-top: 8px;">
+          <span class="pnl-label" style="font-size: 8px;">Trigger Status</span>
+          <span class="pnl-val" id="recStatus" style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;">Scanning Liquidity...</span>
         </div>
       </div>
-      <div class="pnl-row">
-        <span class="pnl-label">Unrealized PnL</span>
-        <span class="pnl-val" id="atpPnl">Waiting for tick...</span>
+    </div>
+
+    <!-- ── Market Session Status ── -->
+    <div class="section">
+      <div class="section-title">
+        Market Session
+        <span class="badge" id="istClock" style="font-family:monospace; letter-spacing:0.5px;">IST --:--</span>
+      </div>
+      <div class="session-row">
+        <span class="session-name">
+          🇬🇧 London
+          <small style="color:var(--text-muted); font-size:10px; display:block;">13:30–15:30 IST core · 18:30 overlap</small>
+        </span>
+        <span class="session-status" id="sessLondon">Checking...</span>
+      </div>
+      <div class="session-row">
+        <span class="session-name">
+          🇺🇸 New York
+          <small style="color:var(--text-muted); font-size:10px; display:block;">18:30–19:30 overlap · 19:30–22:30 active</small>
+        </span>
+        <span class="session-status" id="sessNY">Checking...</span>
+      </div>
+      <div class="session-row" style="margin-bottom:0;">
+        <span class="session-name">
+          🌏 Asia
+          <small style="color:var(--text-muted); font-size:10px; display:block;">07:30–09:30 IST Tokyo · Dead: 09:30–12:30</small>
+        </span>
+        <span class="session-status" id="sessAsia">Checking...</span>
       </div>
     </div>
   </div>
 
-  <!-- ── Prospective Setup Recommendation Panel (shown when scanning and no active trade) ── -->
-  <div id="recommendationPanelWrap" style="display: none;">
-    <div class="active-trade-panel" id="recommendationPanel" style="border-color: var(--border); background: linear-gradient(135deg, rgba(240,185,11,0.08), rgba(11,14,17,0)); transition: all 0.3s ease;">
-      <div class="atp-header">
-        <span class="atp-badge long" id="recBadge" style="background: rgba(240,185,11,0.15); color: var(--accent); border: 1px solid rgba(240,185,11,0.3);">WAITING</span>
-        <span class="atp-title" id="recSymbol">BTCUSDT</span>
-        <span class="atp-mode" id="recMode">HUNTING</span>
+  <!-- TAB 2: METRICS -->
+  <div id="agy-tab-content-metrics" class="agy-tab-content">
+    <!-- ── Performance Journal ── -->
+    <div class="section">
+      <div class="section-title" id="journalTitle">
+        Performance Journal
+        <span id="journalWalletBalance" style="font-size: 11px; color: var(--accent); margin-left: 10px; font-weight: bold;"></span>
+        <span class="badge" id="totalTradeBadge">0 Trades</span>
       </div>
-      <div class="atp-grid">
-        <div class="atp-cell" style="grid-column: span 2;">
-          <div class="atp-label">Pattern</div>
-          <div class="atp-val" id="recPattern" style="font-size: 11px;">Scanning Range</div>
+      <div class="form-group" style="margin-top: 8px; margin-bottom: 8px;">
+        <label for="popupTickerFilter" style="font-size: 9px; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Filter Ticker</label>
+        <select id="popupTickerFilter" style="width: 100%; background: var(--card-bg2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 5px; font-size: 11px; outline: none; cursor: pointer; margin-top: 2px;">
+          <option value="ALL">All Tickers</option>
+        </select>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Wins</div>
+          <div class="stat-value" id="statsWins" style="color: var(--green);">0</div>
         </div>
-        <div class="atp-cell">
-          <div class="atp-label">Probability</div>
-          <div class="atp-val" id="recProbability">—</div>
+        <div class="stat-card">
+          <div class="stat-label">Losses</div>
+          <div class="stat-value" id="statsLosses" style="color: var(--red);">0</div>
         </div>
-        <div class="atp-cell">
-          <div class="atp-label">Displacement</div>
-          <div class="atp-val" id="recDisplacement">—</div>
+        <div class="stat-card">
+          <div class="stat-label">Timeouts</div>
+          <div class="stat-value" id="statsTimeouts" style="color: var(--text-muted);">0</div>
         </div>
-        <div class="atp-cell">
-          <div class="atp-label">Est. Entry</div>
-          <div class="atp-val" id="recEntry">—</div>
-        </div>
-        <div class="atp-cell">
-          <div class="atp-label">Target (TP1)</div>
-          <div class="atp-val" style="color: var(--green);" id="recTarget">—</div>
-        </div>
-        <div class="atp-cell">
-          <div class="atp-label">Stop Loss</div>
-          <div class="atp-val" style="color: var(--red);" id="recStop">—</div>
-        </div>
-        <div class="atp-cell">
-          <div class="atp-label">Dealing Range</div>
-          <div class="atp-val" id="recDealingRange" style="font-size: 10px;">—</div>
-        </div>
-        <div class="atp-cell" style="grid-column: span 2;">
-          <div class="atp-label">FVG Zone</div>
-          <div class="atp-val" id="recFvg" style="font-size: 10px;">—</div>
+        <div class="stat-card">
+          <div class="stat-label">Win Rate</div>
+          <div class="stat-value" id="statsWinrate">0%</div>
         </div>
       </div>
-      <div class="pnl-row" style="margin-top: 8px;">
-        <span class="pnl-label" style="font-size: 8px;">Trigger Status</span>
-        <span class="pnl-val" id="recStatus" style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;">Scanning Liquidity...</span>
+
+      <!-- Win rate bar -->
+      <div class="score-bar-wrap">
+        <div class="score-bar-label">
+          <span>Win Rate</span>
+          <span id="winRateBarLabel">0%</span>
+        </div>
+        <div class="score-bar-track">
+          <div class="score-bar-fill" id="winRateBar" style="width: 0%; background: var(--green);"></div>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- ── Performance Journal ── -->
-  <div class="section">
-    <div class="section-title" id="journalTitle">
-      Performance Journal
-      <span id="journalWalletBalance" style="font-size: 11px; color: var(--accent); margin-left: 10px; font-weight: bold;"></span>
-      <span class="badge" id="totalTradeBadge">0 Trades</span>
-    </div>
-    <div class="form-group" style="margin-top: 8px; margin-bottom: 8px;">
-      <label for="popupTickerFilter" style="font-size: 9px; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Filter Ticker</label>
-      <select id="popupTickerFilter" style="width: 100%; background: var(--card-bg2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 5px; font-size: 11px; outline: none; cursor: pointer; margin-top: 2px;">
-        <option value="ALL">All Tickers</option>
-      </select>
-    </div>
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-label">Wins</div>
-        <div class="stat-value" id="statsWins" style="color: var(--green);">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Losses</div>
-        <div class="stat-value" id="statsLosses" style="color: var(--red);">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Timeouts</div>
-        <div class="stat-value" id="statsTimeouts" style="color: var(--text-muted);">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Win Rate</div>
-        <div class="stat-value" id="statsWinrate">0%</div>
+  <!-- TAB 3: CONFIG -->
+  <div id="agy-tab-content-config" class="agy-tab-content">
+    <!-- ── Settings ── -->
+    <div class="section">
+      <div class="section-title">Simulation Mode</div>
+      <div class="toggle-group">
+        <span class="toggle-label" style="font-weight:700; color: var(--blue);">🧪 Simulation Mode</span>
+        <label class="switch"><input type="checkbox" id="enableSandbox"><span class="slider"></span></label>
       </div>
     </div>
 
-    <!-- Win rate bar -->
-    <div class="score-bar-wrap">
-      <div class="score-bar-label">
-        <span>Win Rate</span>
-        <span id="winRateBarLabel">0%</span>
+    <div class="section">
+      <div class="section-title">Risk Management</div>
+      <div class="form-group" id="group-risk-amount">
+        <label for="riskAmount">Account Risk Size ($): <span id="riskVal">$20</span></label>
+        <input type="range" id="riskAmount" min="5" max="200" step="5" value="20">
       </div>
-      <div class="score-bar-track">
-        <div class="score-bar-fill" id="winRateBar" style="width: 0%; background: var(--green);"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Market Session Status ── -->
-  <div class="section">
-    <div class="section-title">
-      Market Session
-      <span class="badge" id="istClock" style="font-family:monospace; letter-spacing:0.5px;">IST --:--</span>
-    </div>
-    <div class="session-row">
-      <span class="session-name">
-        🇬🇧 London
-        <small style="color:var(--text-muted); font-size:10px; display:block;">13:30–15:30 IST core · 18:30 overlap</small>
-      </span>
-      <span class="session-status" id="sessLondon">Checking...</span>
-    </div>
-    <div class="session-row">
-      <span class="session-name">
-        🇺🇸 New York
-        <small style="color:var(--text-muted); font-size:10px; display:block;">18:30–19:30 overlap · 19:30–22:30 active</small>
-      </span>
-      <span class="session-status" id="sessNY">Checking...</span>
-    </div>
-    <div class="session-row" style="margin-bottom:0;">
-      <span class="session-name">
-        🌏 Asia
-        <small style="color:var(--text-muted); font-size:10px; display:block;">07:30–09:30 IST Tokyo · Dead: 09:30–12:30</small>
-      </span>
-      <span class="session-status" id="sessAsia">Checking...</span>
-    </div>
-  </div>
-
-
-  <!-- ── Settings ── -->
-  <div class="section">
-    <div class="section-title">Simulation Mode</div>
-    <div class="toggle-group">
-      <span class="toggle-label" style="font-weight:700; color: var(--blue);">🧪 Simulation Mode</span>
-      <label class="switch"><input type="checkbox" id="enableSandbox"><span class="slider"></span></label>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Risk Management</div>
-    <div class="form-group" id="group-risk-amount">
-      <label for="riskAmount">Account Risk Size ($): <span id="riskVal">$20</span></label>
-      <input type="range" id="riskAmount" min="5" max="200" step="5" value="20">
-    </div>
-    <div class="form-group" id="group-trade-capital" style="display: none;">
-      <label for="tradeCapital">Trade Capital ($): <span id="capitalVal">$100</span></label>
-      <input type="range" id="tradeCapital" min="10" max="2000" step="10" value="100">
-    </div>
-    <div class="form-group">
-      <label for="leverage">Default Leverage: <span id="levVal">3x</span></label>
-      <input type="range" id="leverage" min="1" max="20" step="1" value="3">
-    </div>
-    <div class="form-group">
-      <label for="sizeMode">Trade Sizing Mode</label>
-      <select id="sizeMode">
-        <option value="RISK">Risk-Based Size</option>
-        <option value="CAPITAL">Capital-Based Size</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label for="targetMode">Target Mode</label>
-      <select id="targetMode">
-        <option value="INDICATOR">SMC / Structure Targets</option>
-        <option value="CUSTOM">Fixed Percentage Targets</option>
-      </select>
-    </div>
-    <div id="group-custom-targets" style="display: none;">
-      <div class="form-group">
-        <label for="customTp">Take Profit (%)</label>
-        <input type="number" id="customTp" min="0.1" max="100" step="0.1" value="2.0">
+      <div class="form-group" id="group-trade-capital" style="display: none;">
+        <label for="tradeCapital">Trade Capital ($): <span id="capitalVal">$100</span></label>
+        <input type="range" id="tradeCapital" min="10" max="2000" step="10" value="100">
       </div>
       <div class="form-group">
-        <label for="customSl">Stop Loss (%)</label>
-        <input type="number" id="customSl" min="0.1" max="100" step="0.1" value="1.0">
+        <label for="leverage">Default Leverage: <span id="levVal">3x</span></label>
+        <input type="range" id="leverage" min="1" max="20" step="1" value="3">
       </div>
-      <div class="form-group" style="margin-top: 10px;">
-        <label for="customTpSlMode">TP/SL Percentage Reference</label>
-        <select id="customTpSlMode">
-          <option value="margin">Margin / Leveraged (ROE %)</option>
-          <option value="position">Total Position Size (Size %)</option>
+      <div class="form-group">
+        <label for="sizeMode">Trade Sizing Mode</label>
+        <select id="sizeMode">
+          <option value="RISK">Risk-Based Size</option>
+          <option value="CAPITAL">Capital-Based Size</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="targetMode">Target Mode</label>
+        <select id="targetMode">
+          <option value="INDICATOR">SMC / Structure Targets</option>
+          <option value="CUSTOM">Fixed Percentage Targets</option>
+        </select>
+      </div>
+      <div id="group-custom-targets" style="display: none;">
+        <div class="form-group">
+          <label for="customTp">Take Profit (%)</label>
+          <input type="number" id="customTp" min="0.1" max="100" step="0.1" value="2.0">
+        </div>
+        <div class="form-group">
+          <label for="customSl">Stop Loss (%)</label>
+          <input type="number" id="customSl" min="0.1" max="100" step="0.1" value="1.0">
+        </div>
+        <div class="form-group" style="margin-top: 10px;">
+          <label for="customTpSlMode">TP/SL Percentage Reference</label>
+          <select id="customTpSlMode">
+            <option value="margin">Margin / Leveraged (ROE %)</option>
+            <option value="position">Total Position Size (Size %)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="marginMode">Margin Mode</label>
+        <select id="marginMode">
+          <option value="ISOLATED">Isolated Margin</option>
+          <option value="CROSS">Cross Margin</option>
+        </select>
+      </div>
+      <div class="form-group" id="group-wallet-balance" style="display: none;">
+        <label for="walletBalanceRange">Account Wallet Balance ($): <span id="walletBalanceVal">$1000</span></label>
+        <input type="range" id="walletBalanceRange" min="100" max="10000" step="50" value="1000">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Advisor Strategy Settings</div>
+      <div class="toggle-group">
+        <span class="toggle-label">Smart Money Concepts (SMC)</span>
+        <label class="switch"><input type="checkbox" id="enableSMC" checked><span class="slider"></span></label>
+      </div>
+      <div class="toggle-group">
+        <span class="toggle-label">RSI / EMA Confirmation</span>
+        <label class="switch"><input type="checkbox" id="enableTechnical" checked><span class="slider"></span></label>
+      </div>
+      <div class="toggle-group">
+        <span class="toggle-label">Audio TTS Alerts</span>
+        <label class="switch"><input type="checkbox" id="enableAudio" checked><span class="slider"></span></label>
+      </div>
+      <div class="toggle-group">
+        <span class="toggle-label" style="font-weight:700; color: var(--accent);">🤖 Auto-Pilot Bot</span>
+        <label class="switch"><input type="checkbox" id="enableAutoPilot"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-group">
+        <span class="toggle-label" style="font-weight:700; color: var(--red);">🛡️ Consecutive Loss Circuit Breaker</span>
+        <label class="switch"><input type="checkbox" id="enableCircuitBreaker" checked><span class="slider"></span></label>
+      </div>
+      <div class="toggle-group">
+        <span class="toggle-label">Enable Candle Timeout</span>
+        <label class="switch"><input type="checkbox" id="enableTimeout" checked><span class="slider"></span></label>
+      </div>
+      <div class="form-group" id="group-timeout-candles" style="margin-top:10px;">
+        <label for="timeoutCandles">Timeout Candles</label>
+        <input type="number" id="timeoutCandles" min="1" max="100" step="1" value="12">
+      </div>
+      <div class="form-group" style="margin-top:10px;">
+        <label for="triggerThreshold">Entry Sensitivity (Min Prob): <span id="thresholdVal">78%</span></label>
+        <input type="range" id="triggerThreshold" min="20" max="95" step="1" value="78">
+      </div>
+      <div class="form-group" style="margin-top:10px;">
+        <label for="timeframe">Analysis Timeframe</label>
+        <select id="timeframe">
+          <option value="5m">5 Minute (Recommended)</option>
+          <option value="15m">15 Minute</option>
+          <option value="1m">1 Minute (Highly Volatile)</option>
         </select>
       </div>
     </div>
-    <div class="form-group">
-      <label for="marginMode">Margin Mode</label>
-      <select id="marginMode">
-        <option value="ISOLATED">Isolated Margin</option>
-        <option value="CROSS">Cross Margin</option>
-      </select>
-    </div>
-    <div class="form-group" id="group-wallet-balance" style="display: none;">
-      <label for="walletBalanceRange">Account Wallet Balance ($): <span id="walletBalanceVal">$1000</span></label>
-      <input type="range" id="walletBalanceRange" min="100" max="10000" step="50" value="1000">
-    </div>
-  </div>
 
-  <div class="section">
-    <div class="section-title">Advisor Strategy Settings</div>
-    <div class="toggle-group">
-      <span class="toggle-label">Smart Money Concepts (SMC)</span>
-      <label class="switch"><input type="checkbox" id="enableSMC" checked><span class="slider"></span></label>
-    </div>
-    <div class="toggle-group">
-      <span class="toggle-label">RSI / EMA Confirmation</span>
-      <label class="switch"><input type="checkbox" id="enableTechnical" checked><span class="slider"></span></label>
-    </div>
-    <div class="toggle-group">
-      <span class="toggle-label">Audio TTS Alerts</span>
-      <label class="switch"><input type="checkbox" id="enableAudio" checked><span class="slider"></span></label>
-    </div>
-    <div class="toggle-group">
-      <span class="toggle-label" style="font-weight:700; color: var(--accent);">🤖 Auto-Pilot Bot</span>
-      <label class="switch"><input type="checkbox" id="enableAutoPilot"><span class="slider"></span></label>
-    </div>
-    <div class="toggle-group">
-      <span class="toggle-label" style="font-weight:700; color: var(--red);">🛡️ Circuit Breaker (Bot Safety)</span>
-      <label class="switch"><input type="checkbox" id="enableCircuitBreaker" checked><span class="slider"></span></label>
-    </div>
-    <div class="toggle-group">
-      <span class="toggle-label">Enable Candle Timeout</span>
-      <label class="switch"><input type="checkbox" id="enableTimeout" checked><span class="slider"></span></label>
-    </div>
-    <div class="form-group" id="group-timeout-candles" style="margin-top:10px;">
-      <label for="timeoutCandles">Timeout Candles</label>
-      <input type="number" id="timeoutCandles" min="1" max="100" step="1" value="12">
-    </div>
-    <div class="form-group" style="margin-top:10px;">
-      <label for="timeframe">Analysis Timeframe</label>
-      <select id="timeframe">
-        <option value="5m">5 Minute (Recommended)</option>
-        <option value="15m">15 Minute</option>
-        <option value="1m">1 Minute (Highly Volatile)</option>
-      </select>
-    </div>
-  </div>
+    <button id="openDashboardBtn" style="width: 100%; margin-top: 10px; margin-bottom: 8px; padding: 10px; background: rgba(30, 144, 255, 0.15); border: 1px solid var(--blue); color: var(--blue); border-radius: 5px; font-size: 11px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s; box-sizing: border-box;">
+      🖥️ Open Master Dashboard
+    </button>
 
-  <button id="openDashboardBtn" style="width: 100%; margin-top: 10px; margin-bottom: 4px; padding: 10px; background: rgba(30, 144, 255, 0.15); border: 1px solid var(--blue); color: var(--blue); border-radius: 5px; font-size: 11px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s; box-sizing: border-box;">
-    🖥️ Open Master Dashboard
-  </button>
-
-  <div class="btn-row">
-    <button class="save-btn" id="saveBtn">Apply Configurations</button>
-    <button class="clear-btn" id="clearBtn" title="Reset Trade History">Clear</button>
+    <div class="btn-row">
+      <button class="save-btn" id="saveBtn">Apply Configurations</button>
+      <button class="clear-btn" id="clearBtn" title="Reset Trade History">Clear</button>
+    </div>
+    <div class="status-msg" id="statusMsg"></div>
   </div>
-  <div class="status-msg" id="statusMsg"></div>
 
   <script src="popup.js"></script>
 </body>

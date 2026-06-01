@@ -110,6 +110,32 @@ function updateJournalTitle(isSandbox) {
   updatePopupEquity();
 }
 
+function fetchPriceMap(callback) {
+  const fapi = `https://fapi.binance.com/fapi/v1/ticker/price`;
+  chrome.runtime.sendMessage({ type: "FETCH_PROXY", url: fapi }, (res) => {
+    if (res && res.success && res.data && Array.isArray(res.data)) {
+      const priceMap = {};
+      res.data.forEach(item => {
+        priceMap[item.symbol] = parseFloat(item.price);
+      });
+      callback(priceMap);
+    } else {
+      const spotUrl = `https://api.binance.com/api/v3/ticker/price`;
+      chrome.runtime.sendMessage({ type: "FETCH_PROXY", url: spotUrl }, (spotRes) => {
+        if (spotRes && spotRes.success && spotRes.data && Array.isArray(spotRes.data)) {
+          const priceMap = {};
+          spotRes.data.forEach(item => {
+            priceMap[item.symbol] = parseFloat(item.price);
+          });
+          callback(priceMap);
+        } else {
+          callback({});
+        }
+      });
+    }
+  });
+}
+
 function updatePopupEquity() {
   chrome.storage.local.get(null, (items) => {
     const isSandbox = items.sandboxMode || false;
@@ -136,45 +162,27 @@ function updatePopupEquity() {
       return;
     }
 
-    const priceUrl = `https://fapi.binance.com/fapi/v1/ticker/price`;
-    fetch(priceUrl)
-      .then(r => {
-        if (!r.ok) throw new Error();
-        return r.json();
-      })
-      .catch(() => {
-        const spotUrl = `https://api.binance.com/api/v3/ticker/price`;
-        return fetch(spotUrl).then(r => r.json());
-      })
-      .then(data => {
-        const priceMap = {};
-        data.forEach(item => {
-          priceMap[item.symbol] = parseFloat(item.price);
-        });
+    fetchPriceMap((priceMap) => {
+      let totalUnrealizedPnl = 0;
+      activeTradesList.forEach(t => {
+        const tTick = priceMap[t.symbol] || parseFloat(t.entry) || 0;
+        const tEntry = parseFloat(t.entry) || 0;
+        const tSize = parseFloat(t.positionSize) || 0;
+        const tIsLong = t.direction === 'LONG';
 
-        let totalUnrealizedPnl = 0;
-        activeTradesList.forEach(t => {
-          const tTick = priceMap[t.symbol] || parseFloat(t.entry) || 0;
-          const tEntry = parseFloat(t.entry) || 0;
-          const tSize = parseFloat(t.positionSize) || 0;
-          const tIsLong = t.direction === 'LONG';
+        const uPnL = tIsLong
+          ? (tTick - tEntry) * tSize
+          : (tEntry - tTick) * tSize;
 
-          const uPnL = tIsLong
-            ? (tTick - tEntry) * tSize
-            : (tEntry - tTick) * tSize;
-
-          totalUnrealizedPnl += uPnL;
-        });
-
-        const equity = walletBalance + totalUnrealizedPnl;
-        const balanceEl = document.getElementById('journalWalletBalance');
-        if (balanceEl) {
-          balanceEl.textContent = `Wallet: $${walletBalance.toFixed(2)} | Equity: $${equity.toFixed(2)}`;
-        }
-      })
-      .catch(err => {
-        console.error("Popup equity fetch error:", err);
+        totalUnrealizedPnl += uPnL;
       });
+
+      const equity = walletBalance + totalUnrealizedPnl;
+      const balanceEl = document.getElementById('journalWalletBalance');
+      if (balanceEl) {
+        balanceEl.textContent = `Wallet: $${walletBalance.toFixed(2)} | Equity: $${equity.toFixed(2)}`;
+      }
+    });
   });
 }
 
@@ -331,8 +339,11 @@ function renderActiveTrade(trade, tabState) {
     document.getElementById('atpStop').textContent   = trade.stopLoss? `$${parseFloat(trade.stopLoss).toFixed(pPrec)}`: '—';
 
     chrome.storage.local.get({ enableTimeout: true, timeoutCandles: 12 }, (tItems) => {
-      const limit = tItems.enableTimeout ? tItems.timeoutCandles : 12;
-      document.getElementById('atpAge').textContent = trade.elapsedCandles != null ? `${trade.elapsedCandles}/${limit}` : '—';
+      if (tItems.enableTimeout) {
+        document.getElementById('atpAge').textContent = trade.elapsedCandles != null ? `${trade.elapsedCandles}/${tItems.timeoutCandles}` : '—';
+      } else {
+        document.getElementById('atpAge').textContent = trade.elapsedCandles != null ? `${trade.elapsedCandles}` : '—';
+      }
     });
 
     document.getElementById('atpMarginRatio').textContent = '—';
@@ -356,131 +367,111 @@ function renderActiveTrade(trade, tabState) {
         }
       }
 
-      const priceUrl = `https://fapi.binance.com/fapi/v1/ticker/price`;
-      fetch(priceUrl)
-        .then(r => {
-          if (!r.ok) throw new Error();
-          return r.json();
-        })
-        .catch(() => {
-          const spotUrl = `https://api.binance.com/api/v3/ticker/price`;
-          return fetch(spotUrl).then(r => r.json());
-        })
-        .then(data => {
-          const priceMap = {};
-          data.forEach(item => {
-            priceMap[item.symbol] = parseFloat(item.price);
+      fetchPriceMap((priceMap) => {
+        const tick = priceMap[trade.symbol] || parseFloat(trade.entry) || 0;
+        if (tick <= 0 || !trade.entry) {
+          document.getElementById('atpPnl').textContent = 'Waiting for tick...';
+          document.getElementById('atpPnl').style.color = 'var(--text-muted)';
+          return;
+        }
+
+        const leverage = parseFloat(trade.leverage) || 3;
+        const entry = parseFloat(trade.entry) || 0;
+        const posSize = parseFloat(trade.positionSize) || 0;
+        const direction = trade.direction;
+
+        if (entry <= 0 || posSize <= 0 || leverage <= 0 || isNaN(entry) || isNaN(posSize) || isNaN(leverage)) {
+          document.getElementById('atpPnl').textContent = '—';
+          document.getElementById('atpMarginRatio').textContent = '0.00%';
+          document.getElementById('atpLiqPrice').textContent = '—';
+          return;
+        }
+
+        const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
+        document.getElementById('atpMarkPrice').textContent = `$${tick.toFixed(pPrec)}`;
+        document.getElementById('atpSize').textContent = `${posSize} units`;
+
+        const pnlPct = isLong
+          ? ((tick - entry) / entry) * 100 * leverage
+          : ((entry - tick) / entry) * 100 * leverage;
+
+        const sizePct = isLong
+          ? ((tick - entry) / entry) * 100
+          : ((entry - tick) / entry) * 100;
+
+        const pnlDollar = isLong
+          ? (tick - entry) * posSize
+          : (entry - tick) * posSize;
+
+        const sign  = pnlPct >= 0 ? '+' : '';
+        const sizeSign = sizePct >= 0 ? '+' : '';
+        const color = pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
+        document.getElementById('atpPnl').textContent = `${sign}${pnlPct.toFixed(2)}% (ROE)  |  ${sizeSign}${sizePct.toFixed(2)}% (Size)  |  ${sign}$${pnlDollar.toFixed(2)}`;
+        document.getElementById('atpPnl').style.color = color;
+
+        if (marginMode === 'CROSS') {
+          let totalUnrealizedPnl = 0;
+          let totalMM = 0;
+          const uPnLMap = {};
+          const mmMap = {};
+
+          activeTradesList.forEach(t => {
+            const tTick = priceMap[t.symbol] || parseFloat(t.entry) || 0;
+            const tEntry = parseFloat(t.entry) || 0;
+            const tSize = parseFloat(t.positionSize) || 0;
+            const tIsLong = t.direction === 'LONG';
+
+            const uPnL = tIsLong
+              ? (tTick - tEntry) * tSize
+              : (tEntry - tTick) * tSize;
+
+            const mm = tSize * tTick * 0.004;
+
+            totalUnrealizedPnl += uPnL;
+            totalMM += mm;
+            uPnLMap[t.symbol] = uPnL;
+            mmMap[t.symbol] = mm;
           });
 
-          const tick = priceMap[trade.symbol] || parseFloat(trade.entry) || 0;
-          if (tick <= 0 || !trade.entry) {
-            document.getElementById('atpPnl').textContent = 'Waiting for tick...';
-            document.getElementById('atpPnl').style.color = 'var(--text-muted)';
-            return;
-          }
+          const marginBalance = activeWalletBalance + totalUnrealizedPnl;
+          const marginRatio = marginBalance <= 0 ? 100 : Math.min((totalMM / marginBalance) * 100, 100);
 
-          const leverage = parseFloat(trade.leverage) || 3;
-          const entry = parseFloat(trade.entry) || 0;
-          const posSize = parseFloat(trade.positionSize) || 0;
-          const direction = trade.direction;
+          const uPnL_i = uPnLMap[trade.symbol] || 0;
+          const MM_i = mmMap[trade.symbol] || 0;
 
-          if (entry <= 0 || posSize <= 0 || leverage <= 0 || isNaN(entry) || isNaN(posSize) || isNaN(leverage)) {
-            document.getElementById('atpPnl').textContent = '—';
-            document.getElementById('atpMarginRatio').textContent = '0.00%';
-            document.getElementById('atpLiqPrice').textContent = '—';
-            return;
+          const otherUnrealizedPnl = totalUnrealizedPnl - uPnL_i;
+          const otherMaintenanceMargin = totalMM - MM_i;
+
+          let liqPrice = 0;
+          if (posSize > 0) {
+            if (isLong) {
+              liqPrice = (entry - (activeWalletBalance + otherUnrealizedPnl - otherMaintenanceMargin) / posSize) / 0.996;
+            } else {
+              liqPrice = (entry + (activeWalletBalance + otherUnrealizedPnl - otherMaintenanceMargin) / posSize) / 1.004;
+            }
           }
 
           const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
-          document.getElementById('atpMarkPrice').textContent = `$${tick.toFixed(pPrec)}`;
-          document.getElementById('atpSize').textContent = `${posSize} units`;
+          document.getElementById('atpMarginRatio').textContent = `${marginRatio.toFixed(2)}%`;
+          document.getElementById('atpMarginRatio').style.color = marginRatio > 50 ? 'var(--red)' : marginRatio > 20 ? 'var(--accent)' : 'var(--green)';
+          document.getElementById('atpLiqPrice').textContent = liqPrice > 0 ? `$${liqPrice.toFixed(pPrec)}` : '—';
+        } else {
+          // Isolated margin mode
+          const marginRequired = (posSize * entry) / leverage;
+          const marginBalance = marginRequired + pnlDollar;
+          const maintenanceMargin = posSize * tick * 0.004;
+          const marginRatio = marginBalance <= 0 ? 100 : Math.min((maintenanceMargin / marginBalance) * 100, 100);
 
-          const pnlPct = isLong
-            ? ((tick - entry) / entry) * 100 * leverage
-            : ((entry - tick) / entry) * 100 * leverage;
+          const liqPrice = isLong
+            ? (entry * (1 - 1 / leverage)) / (1 - 0.004)
+            : (entry * (1 + 1 / leverage)) / (1 + 0.004);
 
-          const sizePct = isLong
-            ? ((tick - entry) / entry) * 100
-            : ((entry - tick) / entry) * 100;
-
-          const pnlDollar = isLong
-            ? (tick - entry) * posSize
-            : (entry - tick) * posSize;
-
-          const sign  = pnlPct >= 0 ? '+' : '';
-          const sizeSign = sizePct >= 0 ? '+' : '';
-          const color = pnlPct >= 0 ? 'var(--green)' : 'var(--red)';
-          document.getElementById('atpPnl').textContent = `${sign}${pnlPct.toFixed(2)}% (ROE)  |  ${sizeSign}${sizePct.toFixed(2)}% (Size)  |  ${sign}$${pnlDollar.toFixed(2)}`;
-          document.getElementById('atpPnl').style.color = color;
-
-          if (marginMode === 'CROSS') {
-            let totalUnrealizedPnl = 0;
-            let totalMM = 0;
-            const uPnLMap = {};
-            const mmMap = {};
-
-            activeTradesList.forEach(t => {
-              const tTick = priceMap[t.symbol] || parseFloat(t.entry) || 0;
-              const tEntry = parseFloat(t.entry) || 0;
-              const tSize = parseFloat(t.positionSize) || 0;
-              const tIsLong = t.direction === 'LONG';
-
-              const uPnL = tIsLong
-                ? (tTick - tEntry) * tSize
-                : (tEntry - tTick) * tSize;
-
-              const mm = tSize * tTick * 0.004;
-
-              totalUnrealizedPnl += uPnL;
-              totalMM += mm;
-              uPnLMap[t.symbol] = uPnL;
-              mmMap[t.symbol] = mm;
-            });
-
-            const marginBalance = activeWalletBalance + totalUnrealizedPnl;
-            const marginRatio = marginBalance <= 0 ? 100 : Math.min((totalMM / marginBalance) * 100, 100);
-
-            const uPnL_i = uPnLMap[trade.symbol] || 0;
-            const MM_i = mmMap[trade.symbol] || 0;
-
-            const otherUnrealizedPnl = totalUnrealizedPnl - uPnL_i;
-            const otherMaintenanceMargin = totalMM - MM_i;
-
-            let liqPrice = 0;
-            if (posSize > 0) {
-              if (isLong) {
-                liqPrice = (entry - (activeWalletBalance + otherUnrealizedPnl - otherMaintenanceMargin) / posSize) / 0.996;
-              } else {
-                liqPrice = (entry + (activeWalletBalance + otherUnrealizedPnl - otherMaintenanceMargin) / posSize) / 1.004;
-              }
-            }
-
-            const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
-            document.getElementById('atpMarginRatio').textContent = `${marginRatio.toFixed(2)}%`;
-            document.getElementById('atpMarginRatio').style.color = marginRatio > 50 ? 'var(--red)' : marginRatio > 20 ? 'var(--accent)' : 'var(--green)';
-            document.getElementById('atpLiqPrice').textContent = liqPrice > 0 ? `$${liqPrice.toFixed(pPrec)}` : '—';
-          } else {
-            // Isolated margin mode
-            const marginRequired = (posSize * entry) / leverage;
-            const marginBalance = marginRequired + pnlDollar;
-            const maintenanceMargin = posSize * tick * 0.004;
-            const marginRatio = marginBalance <= 0 ? 100 : Math.min((maintenanceMargin / marginBalance) * 100, 100);
-
-            const liqPrice = isLong
-              ? (entry * (1 - 1 / leverage)) / (1 - 0.004)
-              : (entry * (1 + 1 / leverage)) / (1 + 0.004);
-
-            const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
-            document.getElementById('atpMarginRatio').textContent = `${marginRatio.toFixed(2)}%`;
-            document.getElementById('atpMarginRatio').style.color = marginRatio > 50 ? 'var(--red)' : marginRatio > 20 ? 'var(--accent)' : 'var(--green)';
-            document.getElementById('atpLiqPrice').textContent = `$${liqPrice.toFixed(pPrec)}`;
-          }
-        })
-        .catch((err) => {
-          console.error("Popup price fetch error:", err);
-          document.getElementById('atpPnl').textContent = 'Price error';
-          document.getElementById('atpPnl').style.color = 'var(--text-muted)';
-        });
+          const pPrec = trade.pricePrecision !== undefined ? trade.pricePrecision : 2;
+          document.getElementById('atpMarginRatio').textContent = `${marginRatio.toFixed(2)}%`;
+          document.getElementById('atpMarginRatio').style.color = marginRatio > 50 ? 'var(--red)' : marginRatio > 20 ? 'var(--accent)' : 'var(--green)';
+          document.getElementById('atpLiqPrice').textContent = `$${liqPrice.toFixed(pPrec)}`;
+        }
+      });
     });
   } else {
     wrap.classList.remove('visible');
@@ -733,6 +724,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const walletBalanceVal        = document.getElementById('walletBalanceVal');
   const enableTimeoutCheckbox   = document.getElementById('enableTimeout');
   const timeoutCandlesInput     = document.getElementById('timeoutCandles');
+  const triggerThresholdInput   = document.getElementById('triggerThreshold');
+  const thresholdVal            = document.getElementById('thresholdVal');
 
   let loadedWalletBalance = 1000;
   let loadedSandboxWalletBalance = 1000;
@@ -781,6 +774,7 @@ document.addEventListener('DOMContentLoaded', () => {
   leverageInput.addEventListener('input',   () => { levVal.textContent  = `${leverageInput.value}x`;  });
   tradeCapitalInput.addEventListener('input', () => { capitalVal.textContent = `$${tradeCapitalInput.value}`; });
   walletBalanceRange.addEventListener('input', () => { walletBalanceVal.textContent = `$${walletBalanceRange.value}`; });
+  triggerThresholdInput.addEventListener('input', () => { thresholdVal.textContent = `${triggerThresholdInput.value}%`; });
   sizeModeSelect.addEventListener('change', updateSettingVisibility);
   targetModeSelect.addEventListener('change', updateSettingVisibility);
   marginModeSelect.addEventListener('change', () => {
@@ -821,12 +815,15 @@ document.addEventListener('DOMContentLoaded', () => {
     walletBalance:   1000,
     sandboxWalletBalance: 1000,
     enableTimeout:   true,
-    timeoutCandles:  12
+    timeoutCandles:  12,
+    triggerThreshold: 78
   }, (items) => {
     riskAmountInput.value = items.riskAmount;
     riskVal.textContent   = `$${items.riskAmount}`;
     leverageInput.value   = items.leverage;
     levVal.textContent    = `${items.leverage}x`;
+    triggerThresholdInput.value = items.triggerThreshold !== undefined ? items.triggerThreshold : 78;
+    thresholdVal.textContent = `${triggerThresholdInput.value}%`;
     enableSMCCheckbox.checked       = items.enableSMC;
     enableTechnicalCheckbox.checked = items.enableTechnical;
     enableAudioCheckbox.checked     = items.enableAudio;
@@ -937,6 +934,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (changes.timeoutCandles) {
       timeoutCandlesInput.value = changes.timeoutCandles.newValue;
     }
+    if (changes.triggerThreshold) {
+      triggerThresholdInput.value = changes.triggerThreshold.newValue;
+      thresholdVal.textContent = `${changes.triggerThreshold.newValue}%`;
+    }
 
     if (changes.sandboxMode) {
       sandboxCheckbox.checked = changes.sandboxMode.newValue;
@@ -990,7 +991,8 @@ document.addEventListener('DOMContentLoaded', () => {
       customTpSlMode:  customTpSlModeSelect ? customTpSlModeSelect.value : 'margin',
       marginMode:      marginModeSelect.value,
       enableTimeout:   enableTimeoutCheckbox.checked,
-      timeoutCandles:  parseInt(timeoutCandlesInput.value)
+      timeoutCandles:  parseInt(timeoutCandlesInput.value),
+      triggerThreshold: parseInt(triggerThresholdInput.value)
     };
 
     if (isSandbox) {
@@ -1062,4 +1064,50 @@ document.addEventListener('DOMContentLoaded', () => {
       recalculateFilteredStats();
     });
   }
+
+  // ── Tab Bindings ──
+  chrome.storage.local.get({ activePopupTab: "setup" }, (items) => {
+    const tabBtns = document.querySelectorAll(".agy-tab-btn");
+    tabBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        switchTab(btn.dataset.tab);
+      });
+    });
+    switchTab(items.activePopupTab || "setup");
+  });
 });
+
+let activeTab = "setup";
+
+function switchTab(tabName) {
+  activeTab = tabName;
+  chrome.storage.local.set({ activePopupTab: tabName });
+
+  const btns = document.querySelectorAll(".agy-tab-btn");
+  const nav = document.querySelector(".agy-tabs-nav");
+  btns.forEach((btn, index) => {
+    if (btn.dataset.tab === tabName) {
+      btn.classList.add("active");
+      if (nav) {
+        nav.style.setProperty("--agy-tab-left", `${index * 33.333}%`);
+      }
+    } else {
+      btn.classList.remove("active");
+    }
+  });
+
+  const panels = ["setup", "metrics", "config"];
+  panels.forEach(p => {
+    const el = document.getElementById(`agy-tab-content-${p}`);
+    if (el) {
+      if (p === tabName) {
+        el.style.display = "block";
+        el.offsetHeight; // trigger reflow
+        el.classList.add("active");
+      } else {
+        el.style.display = "none";
+        el.classList.remove("active");
+      }
+    }
+  });
+}

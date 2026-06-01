@@ -580,11 +580,11 @@
       <div id="agy-hud-maximized">
         <div class="agy-header" id="agy-drag-handle">
           <div class="agy-title-container">
-            <span class="agy-logo">⚡</span>
-            <span class="agy-text-title">ANTIGRAVITY TICKER HUD OVERLAY</span>
-            <span class="agy-active-pair" id="agy-pair-label">USDT</span>
-            <span class="agy-mode-badge hunting" id="agy-mode-indicator">HUNTING</span>
-            <span class="agy-auto-badge auto-off" id="agy-auto-indicator" style="cursor: pointer; font-size: 8px !important; font-weight: 800 !important; padding: 2px 5px !important; border-radius: 4px !important; text-transform: uppercase !important; display: inline-block !important; letter-spacing: 0.5px !important;" title="Click to Toggle Auto-Pilot">🤖 AUTO: OFF</span>
+            <span class="agy-logo" style="width: 18px !important; height: 18px !important; font-size: 11px !important;">⚡</span>
+            <span class="agy-text-title" style="font-size: 10px !important;">AGY HUD</span>
+            <span class="agy-active-pair" id="agy-pair-label" style="font-size: 8px !important; padding: 1px 3px !important;">USDT</span>
+            <span class="agy-mode-badge hunting" id="agy-mode-indicator" style="font-size: 7px !important; padding: 1px 4px !important;">HUNTING</span>
+            <span class="agy-auto-badge auto-off" id="agy-auto-indicator" style="cursor: pointer; font-size: 7px !important; font-weight: 800 !important; padding: 1px 4px !important; border-radius: 3px !important; text-transform: uppercase !important; display: inline-block !important; letter-spacing: 0.5px !important;" title="Click to Toggle Auto-Pilot">🤖 OFF</span>
           </div>
           <div class="agy-controls">
             <button class="agy-btn" id="agy-btn-dashboard" title="Open Control Room" style="margin-right: 6px; font-size: 11px;">🎛️</button>
@@ -852,10 +852,10 @@
     const autoEl = document.getElementById("agy-auto-indicator");
     if (!autoEl) return;
     if (settings.enableAutoPilot) {
-      autoEl.textContent = "🤖 AUTO: ON";
+      autoEl.textContent = "🤖 ON";
       autoEl.className = "agy-auto-badge auto-on";
     } else {
-      autoEl.textContent = "🤖 AUTO: OFF";
+      autoEl.textContent = "🤖 OFF";
       autoEl.className = "agy-auto-badge auto-off";
     }
   }
@@ -1139,8 +1139,12 @@
 
     if (activeMonitorBox && monitorTime && monitorLevels && actionBtnContainer) {
       if (activeTrade && (activeTrade.status === "ACTIVE" || activeTrade.status === "SANDBOX_ACTIVE")) {
-        const limit = settings.enableTimeout !== false ? (settings.timeoutCandles !== undefined ? settings.timeoutCandles : 12) : 12;
-        monitorTime.textContent = `Age: ${activeTrade.elapsedCandles || 0}/${limit} candles`;
+        if (settings.enableTimeout !== false) {
+          const limit = settings.timeoutCandles !== undefined ? settings.timeoutCandles : 12;
+          monitorTime.textContent = `Age: ${activeTrade.elapsedCandles || 0}/${limit} candles`;
+        } else {
+          monitorTime.textContent = `Age: ${activeTrade.elapsedCandles || 0} candles`;
+        }
 
         const sideColor = activeTrade.direction === "LONG" ? "#2ebd85" : "#f6465d";
         const leverage = parseFloat(activeTrade.leverage) || parseFloat(settings.leverage) || 3;

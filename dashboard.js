@@ -856,24 +856,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const tryFetchPrice = (idx) => {
         if (idx >= endpoints.length) return;
-        fetch(endpoints[idx])
-          .then(r => {
-            if (!r.ok) throw new Error();
-            return r.json();
-          })
-          .then(d => {
-            const price = parseFloat(d.price);
-            if (price > 0) {
-              priceCache[sym] = price;
-              if (activeTrades[sym]) {
-                updatePnLDisplay(sym);
-              } else {
-                updateDashboardEquity();
-              }
-              updateTickerFilterPrices();
+        chrome.runtime.sendMessage({ type: "FETCH_PROXY", url: endpoints[idx] }, (response) => {
+          if (response && response.success) {
+            let data = response.data;
+            if (!data && response.text) {
+              try {
+                data = JSON.parse(response.text);
+              } catch (e) {}
             }
-          })
-          .catch(() => tryFetchPrice(idx + 1));
+            if (data && data.price) {
+              const price = parseFloat(data.price);
+              if (price > 0) {
+                priceCache[sym] = price;
+                if (activeTrades[sym]) {
+                  updatePnLDisplay(sym);
+                } else {
+                  updateDashboardEquity();
+                }
+                updateTickerFilterPrices();
+                return; // success
+              }
+            }
+          }
+          tryFetchPrice(idx + 1);
+        });
       };
 
       tryFetchPrice(0);
