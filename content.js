@@ -228,21 +228,300 @@
   }
 
   function startSymbolDetectionLoop() {
-    setInterval(() => {
-      if (!isContextValid()) return;
-      const detected = detectSymbolFromPage();
-      if (detected && detected !== activeSymbol) {
-        console.log(`🎯 Active symbol changed to: ${detected}`);
-        activeSymbol = detected;
-        candles = [];
-        currentTickPrice = 0;
-        activeTrade = null;
-        requestInitialHUDData();
+    const intervalId = setInterval(() => {
+      if (!isContextValid()) {
+        clearInterval(intervalId);
+        return;
+      }
+      
+      const isFuturesPage = window.location.pathname.includes('/futures/');
+      if (isFuturesPage) {
+        const detected = detectSymbolFromPage();
+        if (detected) {
+          if (detected !== activeSymbol) {
+            console.log(`🎯 Active symbol changed to: ${detected}`);
+            activeSymbol = detected;
+            candles = [];
+            currentTickPrice = 0;
+            activeTrade = null;
+            injectHUD();
+            if (hudRoot) hudRoot.style.display = 'block';
+            requestInitialHUDData();
+          } else {
+            if (hudRoot) hudRoot.style.display = 'block';
+          }
+        } else {
+          if (hudRoot) hudRoot.style.display = 'none';
+        }
+      } else {
+        if (hudRoot) hudRoot.style.display = 'none';
       }
     }, 1500);
   }
 
   // --- UI RENDER HELPERS ---
+  function renderMiniSVGChart(svgEl, candles, currentSignal) {
+    if (!svgEl) return;
+    svgEl.innerHTML = ""; // Clear existing drawings
+
+    if (!candles || candles.length < 5) {
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", "50%");
+      text.setAttribute("y", "50%");
+      text.setAttribute("dominant-baseline", "middle");
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("fill", "#848e9c");
+      text.setAttribute("font-size", "10px");
+      text.textContent = "Loading Chart Snapshot...";
+      svgEl.appendChild(text);
+      return;
+    }
+
+    // Select the last 35 candles
+    const subset = candles.slice(-35);
+    const width = svgEl.clientWidth || 388; // Default width matching HUD padding
+    const height = svgEl.clientHeight || 120;
+
+    // Pad container bounds so candles don't touch edges
+    const highs = subset.map(c => c.high);
+    const lows = subset.map(c => c.low);
+    let maxP = Math.max(...highs);
+    let minP = Math.min(...lows);
+    
+    // Add active indicators / signal levels to the min/max calculation so they are visible on chart
+    const levelsToInclude = [];
+    if (currentSignal.sweptPoolPrice) levelsToInclude.push(currentSignal.sweptPoolPrice);
+    if (currentSignal.mssPrice) levelsToInclude.push(currentSignal.mssPrice);
+    if (currentSignal.pendingMssPrice) levelsToInclude.push(currentSignal.pendingMssPrice);
+    if (currentSignal.fvgTop) levelsToInclude.push(currentSignal.fvgTop);
+    if (currentSignal.fvgBottom) levelsToInclude.push(currentSignal.fvgBottom);
+    if (currentSignal.nearestSupport) levelsToInclude.push(currentSignal.nearestSupport.price);
+    if (currentSignal.nearestResistance) levelsToInclude.push(currentSignal.nearestResistance.price);
+    if (currentSignal.equilibrium) levelsToInclude.push(currentSignal.equilibrium);
+
+    levelsToInclude.forEach(lvl => {
+      if (lvl > 0) {
+        if (lvl > maxP) maxP = lvl;
+        if (lvl < minP) minP = lvl;
+      }
+    });
+
+    const priceRange = maxP - minP;
+    const padding = priceRange * 0.08 || 1;
+    const chartMax = maxP + padding;
+    const chartMin = minP - padding;
+    const chartHeightRange = chartMax - chartMin;
+
+    // Helper functions for scaling coordinates
+    function getX(index) {
+      return (index / (subset.length - 1)) * (width - 16) + 8;
+    }
+
+    function getY(price) {
+      return height - ((price - chartMin) / chartHeightRange) * (height - 16) - 8;
+    }
+
+    // 1. Draw FVG Zone (if present)
+    if (currentSignal.fvgTop && currentSignal.fvgBottom) {
+      const fvgYTop = getY(currentSignal.fvgTop);
+      const fvgYBottom = getY(currentSignal.fvgBottom);
+      
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", "0");
+      rect.setAttribute("y", Math.min(fvgYTop, fvgYBottom));
+      rect.setAttribute("width", width);
+      rect.setAttribute("height", Math.abs(fvgYTop - fvgYBottom));
+      rect.setAttribute("fill", "rgba(240, 185, 11, 0.06)");
+      rect.setAttribute("stroke", "rgba(240, 185, 11, 0.15)");
+      rect.setAttribute("stroke-width", "1");
+      rect.setAttribute("stroke-dasharray", "2,2");
+      svgEl.appendChild(rect);
+    }
+
+    // 2. Draw Candlesticks
+    const candleWidth = Math.max(2, (width / subset.length) * 0.6);
+    
+    subset.forEach((c, i) => {
+      const x = getX(i);
+      const yHigh = getY(c.high);
+      const yLow = getY(c.low);
+      const yOpen = getY(c.open);
+      const yClose = getY(c.close);
+      
+      const isBullish = c.close >= c.open;
+      const color = isBullish ? "#2ebd85" : "#f6465d";
+
+      // Wick line
+      const wick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      wick.setAttribute("x1", x);
+      wick.setAttribute("y1", yHigh);
+      wick.setAttribute("x2", x);
+      wick.setAttribute("y2", yLow);
+      wick.setAttribute("stroke", color);
+      wick.setAttribute("stroke-width", "1.2");
+      svgEl.appendChild(wick);
+
+      // Body rect
+      const body = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      body.setAttribute("x", x - candleWidth / 2);
+      body.setAttribute("y", Math.min(yOpen, yClose));
+      body.setAttribute("width", candleWidth);
+      body.setAttribute("height", Math.max(1, Math.abs(yOpen - yClose)));
+      body.setAttribute("fill", isBullish ? "rgba(46, 189, 133, 0.85)" : "rgba(246, 70, 93, 0.85)");
+      body.setAttribute("stroke", color);
+      body.setAttribute("stroke-width", "0.5");
+      svgEl.appendChild(body);
+    });
+
+    // 3. Draw Support (SSL) Level (if present)
+    if (currentSignal.nearestSupport) {
+      const ySupp = getY(currentSignal.nearestSupport.price);
+      
+      // Line
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", "0");
+      line.setAttribute("y1", ySupp);
+      line.setAttribute("x2", width);
+      line.setAttribute("y2", ySupp);
+      line.setAttribute("stroke", "#2ebd85");
+      line.setAttribute("stroke-width", "1");
+      line.setAttribute("stroke-dasharray", "3,3");
+      line.setAttribute("opacity", "0.6");
+      svgEl.appendChild(line);
+
+      // Text label
+      const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      txt.setAttribute("x", "4");
+      txt.setAttribute("y", ySupp - 3);
+      txt.setAttribute("fill", "#2ebd85");
+      txt.setAttribute("font-size", "7px");
+      txt.setAttribute("font-weight", "bold");
+      txt.textContent = `SUP (${currentSignal.nearestSupport.type}): $${formatPrice(currentSignal.nearestSupport.price)}`;
+      svgEl.appendChild(txt);
+    }
+
+    // 4. Draw Resistance (BSL) Level (if present)
+    if (currentSignal.nearestResistance) {
+      const yRes = getY(currentSignal.nearestResistance.price);
+      
+      // Line
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", "0");
+      line.setAttribute("y1", yRes);
+      line.setAttribute("x2", width);
+      line.setAttribute("y2", yRes);
+      line.setAttribute("stroke", "#f6465d");
+      line.setAttribute("stroke-width", "1");
+      line.setAttribute("stroke-dasharray", "3,3");
+      line.setAttribute("opacity", "0.6");
+      svgEl.appendChild(line);
+
+      // Text label
+      const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      txt.setAttribute("x", "4");
+      txt.setAttribute("y", yRes - 3);
+      txt.setAttribute("fill", "#f6465d");
+      txt.setAttribute("font-size", "7px");
+      txt.setAttribute("font-weight", "bold");
+      txt.textContent = `RES (${currentSignal.nearestResistance.type}): $${formatPrice(currentSignal.nearestResistance.price)}`;
+      svgEl.appendChild(txt);
+    }
+
+    // 5. Draw MSS / Pending MSS Level (if present)
+    if (currentSignal.mssPrice || currentSignal.pendingMssPrice) {
+      const mssVal = currentSignal.mssPrice || currentSignal.pendingMssPrice;
+      const isConfirmed = !!currentSignal.mssPrice;
+      const yMss = getY(mssVal);
+      
+      // Line
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", "0");
+      line.setAttribute("y1", yMss);
+      line.setAttribute("x2", width);
+      line.setAttribute("y2", yMss);
+      line.setAttribute("stroke", "#f0b90b");
+      line.setAttribute("stroke-width", "1.2");
+      line.setAttribute("stroke-dasharray", isConfirmed ? "none" : "5,4");
+      line.setAttribute("opacity", "0.85");
+      svgEl.appendChild(line);
+
+      // Text label
+      const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      txt.setAttribute("x", width - 4);
+      txt.setAttribute("y", yMss - 3);
+      txt.setAttribute("fill", "#f0b90b");
+      txt.setAttribute("font-size", "7px");
+      txt.setAttribute("font-weight", "bold");
+      txt.setAttribute("text-anchor", "end");
+      txt.textContent = isConfirmed ? `MSS: $${formatPrice(mssVal)}` : `PENDING MSS: $${formatPrice(mssVal)}`;
+      svgEl.appendChild(txt);
+    }
+
+    // 6. Draw Equilibrium Line (if present)
+    if (currentSignal.equilibrium) {
+      const yEq = getY(currentSignal.equilibrium);
+      
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", "0");
+      line.setAttribute("y1", yEq);
+      line.setAttribute("x2", width);
+      line.setAttribute("y2", yEq);
+      line.setAttribute("stroke", "#848e9c");
+      line.setAttribute("stroke-width", "0.8");
+      line.setAttribute("stroke-dasharray", "4,4");
+      line.setAttribute("opacity", "0.4");
+      svgEl.appendChild(line);
+
+      const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      txt.setAttribute("x", width / 2);
+      txt.setAttribute("y", yEq - 3);
+      txt.setAttribute("fill", "#848e9c");
+      txt.setAttribute("font-size", "6px");
+      txt.setAttribute("text-anchor", "middle");
+      txt.textContent = `EQ: $${formatPrice(currentSignal.equilibrium)}`;
+      svgEl.appendChild(txt);
+    }
+
+    // 7. Draw Current Price Level (pulsing line)
+    const yCurrent = getY(currentTickPrice);
+    if (yCurrent >= 0 && yCurrent <= height) {
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", "0");
+      line.setAttribute("y1", yCurrent);
+      line.setAttribute("x2", width);
+      line.setAttribute("y2", yCurrent);
+      line.setAttribute("stroke", "#fff");
+      line.setAttribute("stroke-width", "1");
+      line.setAttribute("opacity", "0.55");
+      svgEl.appendChild(line);
+
+      const labelGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", width - 50);
+      rect.setAttribute("y", yCurrent - 6);
+      rect.setAttribute("width", "48");
+      rect.setAttribute("height", "12");
+      rect.setAttribute("rx", "2");
+      rect.setAttribute("fill", "#2b3139");
+      rect.setAttribute("stroke", "#f0b90b");
+      rect.setAttribute("stroke-width", "0.5");
+      labelGroup.appendChild(rect);
+
+      const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      txt.setAttribute("x", width - 26);
+      txt.setAttribute("y", yCurrent + 3);
+      txt.setAttribute("fill", "#fff");
+      txt.setAttribute("font-size", "7px");
+      txt.setAttribute("font-weight", "bold");
+      txt.setAttribute("text-anchor", "middle");
+      txt.textContent = `$${formatPrice(currentTickPrice)}`;
+      labelGroup.appendChild(txt);
+      
+      svgEl.appendChild(labelGroup);
+    }
+  }
+
   function formatPrice(val) {
     const num = parseFloat(val);
     if (isNaN(num)) return "0.00";
@@ -256,6 +535,42 @@
   }
 
   // --- DOM INJECTION & HUD UI MANAGEMENT ---
+  let activeTab = "setup";
+
+  function switchTab(tabName) {
+    activeTab = tabName;
+    chrome.storage.local.set({ activeTab: tabName });
+
+    const btns = hudRoot.querySelectorAll(".agy-tab-btn");
+    const nav = hudRoot.querySelector(".agy-tabs-nav");
+    btns.forEach((btn, index) => {
+      if (btn.dataset.tab === tabName) {
+        btn.classList.add("active");
+        if (nav) {
+          nav.style.setProperty("--agy-tab-left", `${index * 33.333}%`);
+        }
+      } else {
+        btn.classList.remove("active");
+      }
+    });
+
+    const panels = ["setup", "chart", "metrics"];
+    panels.forEach(p => {
+      const el = document.getElementById(`agy-tab-content-${p}`);
+      if (el) {
+        if (p === tabName) {
+          el.style.display = "block";
+          // Trigger reflow
+          el.offsetHeight;
+          el.classList.add("active");
+        } else {
+          el.style.display = "none";
+          el.classList.remove("active");
+        }
+      }
+    });
+  }
+
   function injectHUD() {
     if (document.getElementById("antigravity-hud-root")) return;
 
@@ -277,80 +592,148 @@
           </div>
         </div>
 
+        <div class="agy-tabs-nav">
+          <button class="agy-tab-btn" data-tab="setup">🎯 SETUP</button>
+          <button class="agy-tab-btn" data-tab="chart">📈 CHART</button>
+          <button class="agy-tab-btn" data-tab="metrics">📊 METRICS</button>
+        </div>
+
         <div class="agy-body">
           <!-- Large Flashing Warning Banner -->
           <div id="agy-flash-warning" class="agy-flash-alert" style="display: none;"></div>
 
-          <!-- Dial -->
-          <div class="agy-gauge-section">
-            <div class="agy-gauge-wrapper">
-              <div class="agy-gauge-bg"></div>
-              <div class="agy-gauge-fill" id="agy-probability-fill"></div>
-              <div class="agy-gauge-value" id="agy-probability-val">50%</div>
+          <!-- TAB 1: SETUP -->
+          <div id="agy-tab-content-setup" class="agy-tab-content">
+            <!-- Dial -->
+            <div class="agy-gauge-section" style="margin-bottom: 8px !important;">
+              <div class="agy-gauge-wrapper">
+                <div class="agy-gauge-bg"></div>
+                <div class="agy-gauge-fill" id="agy-probability-fill"></div>
+                <div class="agy-gauge-value" id="agy-probability-val">50%</div>
+              </div>
+              <div class="agy-gauge-label" id="agy-bias-label">Neutral Bias</div>
+              <div id="agy-pattern-text" style="font-size: 11px; font-weight: 700; color: #fff; margin-top: 5px;">Scanning Markets</div>
             </div>
-            <div class="agy-gauge-label" id="agy-bias-label">Neutral Bias</div>
-            <div id="agy-pattern-text" style="font-size: 11px; font-weight: 700; color: #fff; margin-top: 5px;">Scanning Markets</div>
-          </div>
 
-          <!-- Live Trade Monitor Overlay -->
-          <div id="agy-live-monitor-box" style="display:none; background: rgba(24, 26, 32, 0.7); border: 1px solid rgba(240, 185, 11, 0.4); border-radius: 8px; padding: 10px; margin-bottom: 12px; transition: opacity 0.3s ease;">
-            <div style="display:flex; justify-content:space-between; font-size: 10px; font-weight: 800; color: #f0b90b; margin-bottom: 6px; text-transform: uppercase;">
-              <span>📈 Live Tracker Active</span>
-              <span id="agy-track-time">Age: 0 candles</span>
+            <!-- Bias Bar -->
+            <div class="agy-bias-section" style="margin-bottom: 14px; padding: 0 5px;">
+              <div style="display: flex; justify-content: space-between; font-size: 10px; font-weight: 800; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <span style="color: #2ebd85;">Long Bias: <span id="agy-long-bias-val">50%</span></span>
+                <span style="color: #f6465d;">Short Bias: <span id="agy-short-bias-val">50%</span></span>
+              </div>
+              <div class="agy-bias-bar-wrapper" style="height: 6px; background: #2b3139; border-radius: 3px; overflow: hidden; display: flex; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);">
+                <div id="agy-long-bias-bar" style="width: 50%; background: #2ebd85; transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);"></div>
+                <div id="agy-short-bias-bar" style="width: 50%; background: #f6465d; transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);"></div>
+              </div>
             </div>
-            <div class="agy-trade-levels" id="agy-track-levels"></div>
-            <div id="agy-btn-action-container"></div>
-          </div>
 
-          <!-- Indicators grid -->
-          <div class="agy-indicator-grid">
-            <div class="agy-ind-card">
-              <span class="agy-ind-name">Timeframe</span>
-              <span class="agy-ind-val" id="agy-ind-tf">5m</span>
+            <!-- Live Trade Monitor Overlay -->
+            <div id="agy-live-monitor-box" style="display:none; background: rgba(24, 26, 32, 0.7); border: 1px solid rgba(240, 185, 11, 0.4); border-radius: 8px; padding: 10px; margin-bottom: 12px; transition: opacity 0.3s ease;">
+              <div style="display:flex; justify-content:space-between; font-size: 10px; font-weight: 800; color: #f0b90b; margin-bottom: 6px; text-transform: uppercase;">
+                <span>📈 Live Tracker Active</span>
+                <span id="agy-track-time">Age: 0 candles</span>
+              </div>
+              <div class="agy-trade-levels" id="agy-track-levels"></div>
+              <div id="agy-btn-action-container"></div>
             </div>
-            <div class="agy-ind-card">
-              <span class="agy-ind-name">Displacement</span>
-              <span class="agy-ind-val">
-                <span class="agy-dot" id="agy-dot-disp" style="color: #848e9c;"></span>
-                <span id="agy-val-disp">--</span>
-              </span>
-            </div>
-            <div class="agy-ind-card">
-              <span class="agy-ind-name">FVG Mitigation</span>
-              <span class="agy-ind-val">
-                <span class="agy-dot" id="agy-dot-fvg" style="color: #848e9c;"></span>
-                <span id="agy-val-fvg">--</span>
-              </span>
-            </div>
-            <div class="agy-ind-card">
-              <span class="agy-ind-name">Dealing Range</span>
-              <span class="agy-ind-val">
-                <span class="agy-dot" id="agy-dot-range" style="color: #848e9c;"></span>
-                <span id="agy-val-range">--</span>
-              </span>
-            </div>
-            <div class="agy-ind-card" style="grid-column: span 2;">
-              <span class="agy-ind-name">Swept Pool</span>
-              <span class="agy-ind-val" id="agy-val-sweep" style="color: #fff; font-size: 10px !important;">--</span>
-            </div>
-            <div class="agy-ind-card" style="grid-column: span 2;">
-              <span class="agy-ind-name" id="agy-ledger-title">Postgres Ledger</span>
-              <span class="agy-ind-val" style="color: #fff; font-family: monospace;">
-                <span id="agy-val-wins" style="color: #2ebd85;">0</span>/
-                <span id="agy-val-losses" style="color: #f6465d;">0</span>/
-                <span id="agy-val-timeouts" style="color: #848e9c;">0</span>
-              </span>
+
+            <!-- Trade recommendation box -->
+            <div class="agy-trade-box" id="agy-trade-recommendation-box" style="transition: opacity 0.3s ease;">
+              <div class="agy-trade-badge" id="agy-trade-badge">No Setup</div>
+              <div class="agy-trade-title">Futures Recommendation</div>
+              <div class="agy-trade-levels" id="agy-trade-levels">
+                <div class="agy-lvl-item">
+                  <span class="agy-lvl-name">Status</span>
+                  <span class="agy-lvl-val" style="color: #848e9c;" id="agy-rec-status">Scanning...</span>
+                </div>
+              </div>
             </div>
           </div>
 
-          <!-- Trade recommendation box -->
-          <div class="agy-trade-box" id="agy-trade-recommendation-box" style="transition: opacity 0.3s ease;">
-            <div class="agy-trade-badge" id="agy-trade-badge">No Setup</div>
-            <div class="agy-trade-title">Futures Recommendation</div>
-            <div class="agy-trade-levels" id="agy-trade-levels">
-              <div class="agy-lvl-item">
-                <span class="agy-lvl-name">Status</span>
-                <span class="agy-lvl-val" style="color: #848e9c;" id="agy-rec-status">Scanning...</span>
+          <!-- TAB 2: CHART -->
+          <div id="agy-tab-content-chart" class="agy-tab-content" style="display: none;">
+            <!-- SVG Candlestick Chart -->
+            <div style="font-size: 10px; font-weight: 800; color: #848e9c; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 5px;">📈 Live SMC Chart Snapshot</div>
+            <div id="agy-chart-container" style="background: rgba(16, 18, 23, 0.65) !important; border: 1px solid rgba(43, 49, 57, 0.6) !important; border-radius: 8px !important; padding: 8px 6px !important; margin-bottom: 14px !important; overflow: visible !important;">
+              <svg id="agy-svg-chart" style="width: 100% !important; height: 120px !important; display: block !important; overflow: visible !important;"></svg>
+            </div>
+
+            <!-- Key Levels Section -->
+            <div style="font-size: 10px; font-weight: 800; color: #848e9c; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">🎯 Key Levels</div>
+            <div class="agy-indicator-grid" style="margin-bottom: 4px;">
+              <div class="agy-ind-card">
+                <span class="agy-ind-name">Nearest Support (SSL)</span>
+                <span class="agy-ind-val" id="agy-val-support" style="color: #2ebd85;">--</span>
+              </div>
+              <div class="agy-ind-card">
+                <span class="agy-ind-name">Nearest Resistance (BSL)</span>
+                <span class="agy-ind-val" id="agy-val-resistance" style="color: #f6465d;">--</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 3: METRICS -->
+          <div id="agy-tab-content-metrics" class="agy-tab-content" style="display: none;">
+            <!-- Scalper Metrics Section -->
+            <div style="font-size: 10px; font-weight: 800; color: #848e9c; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">📊 Scalper Metrics</div>
+            <div class="agy-indicator-grid" style="margin-bottom: 12px;">
+              <div class="agy-ind-card">
+                <span class="agy-ind-name">Market Regime</span>
+                <span class="agy-ind-val" id="agy-val-regime">--</span>
+              </div>
+              <div class="agy-ind-card">
+                <span class="agy-ind-name">Bid/Ask Spread</span>
+                <span class="agy-ind-val" id="agy-val-spread">--</span>
+              </div>
+              <div class="agy-ind-card">
+                <span class="agy-ind-name">HTF Trend</span>
+                <span class="agy-ind-val" id="agy-val-htf">--</span>
+              </div>
+              <div class="agy-ind-card">
+                <span class="agy-ind-name">Order Imbalance</span>
+                <span class="agy-ind-val" id="agy-val-imbalance">--</span>
+              </div>
+            </div>
+
+            <!-- Indicators grid -->
+            <div style="font-size: 10px; font-weight: 800; color: #848e9c; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">⚡ SMC Indicators</div>
+            <div class="agy-indicator-grid">
+              <div class="agy-ind-card">
+                <span class="agy-ind-name">Timeframe</span>
+                <span class="agy-ind-val" id="agy-ind-tf">5m</span>
+              </div>
+              <div class="agy-ind-card">
+                <span class="agy-ind-name">Displacement</span>
+                <span class="agy-ind-val">
+                  <span class="agy-dot" id="agy-dot-disp" style="color: #848e9c;"></span>
+                  <span id="agy-val-disp">--</span>
+                </span>
+              </div>
+              <div class="agy-ind-card">
+                <span class="agy-ind-name">FVG Mitigation</span>
+                <span class="agy-ind-val">
+                  <span class="agy-dot" id="agy-dot-fvg" style="color: #848e9c;"></span>
+                  <span id="agy-val-fvg">--</span>
+                </span>
+              </div>
+              <div class="agy-ind-card">
+                <span class="agy-ind-name">Dealing Range</span>
+                <span class="agy-ind-val">
+                  <span class="agy-dot" id="agy-dot-range" style="color: #848e9c;"></span>
+                  <span id="agy-val-range">--</span>
+                </span>
+              </div>
+              <div class="agy-ind-card" style="grid-column: span 2;">
+                <span class="agy-ind-name">Swept Pool</span>
+                <span class="agy-ind-val" id="agy-val-sweep" style="color: #fff; font-size: 10px !important;">--</span>
+              </div>
+              <div class="agy-ind-card" style="grid-column: span 2;">
+                <span class="agy-ind-name" id="agy-ledger-title">Postgres Ledger</span>
+                <span class="agy-ind-val" style="color: #fff; font-family: monospace;">
+                  <span id="agy-val-wins" style="color: #2ebd85;">0</span>/
+                  <span id="agy-val-losses" style="color: #f6465d;">0</span>/
+                  <span id="agy-val-timeouts" style="color: #848e9c;">0</span>
+                </span>
               </div>
             </div>
           </div>
@@ -394,11 +777,19 @@
       }
     });
 
-    chrome.storage.local.get({ hudPos: { top: 70, right: 20 } }, (items) => {
+    chrome.storage.local.get({ hudPos: { top: 70, right: 20 }, activeTab: "setup" }, (items) => {
       hudRoot.style.top = `${items.hudPos.top}px`;
       hudRoot.style.right = `${items.hudPos.right}px`;
       hudRoot.style.left = "auto";
       updateAutoPilotHUDDisplay();
+      
+      const tabBtns = hudRoot.querySelectorAll(".agy-tab-btn");
+      tabBtns.forEach(btn => {
+        btn.addEventListener("click", () => {
+          switchTab(btn.dataset.tab);
+        });
+      });
+      switchTab(items.activeTab || "setup");
     });
   }
 
@@ -508,8 +899,6 @@
     let calculatedOpacity = 1.0;
 
     if (activeTrade && (activeTrade.status === "ACTIVE" || activeTrade.status === "SANDBOX_ACTIVE")) {
-      const limit = settings.enableTimeout !== false ? (settings.timeoutCandles !== undefined ? settings.timeoutCandles : 12) : 12;
-      const timeOpacity = Math.max(0.0, 1 - (activeTrade.elapsedCandles / limit));
       const initialDistance = Math.abs(activeTrade.entry - activeTrade.stopLoss);
       const currentDistance = Math.abs(currentTickPrice - activeTrade.stopLoss);
 
@@ -519,7 +908,7 @@
       } else if (activeTrade.direction === "SHORT" && currentTickPrice > activeTrade.entry) {
         priceOpacity = initialDistance > 0 ? currentDistance / initialDistance : 1;
       }
-      calculatedOpacity = Math.max(0.15, Math.min(timeOpacity, priceOpacity));
+      calculatedOpacity = Math.max(0.15, priceOpacity);
     }
 
     if (fillEl && valEl && biasEl && patternEl) {
@@ -583,6 +972,64 @@
       }
     }
 
+    // Update Bias Bar
+    const longBiasValEl = document.getElementById("agy-long-bias-val");
+    const shortBiasValEl = document.getElementById("agy-short-bias-val");
+    const longBiasBarEl = document.getElementById("agy-long-bias-bar");
+    const shortBiasBarEl = document.getElementById("agy-short-bias-bar");
+
+    if (longBiasValEl && shortBiasValEl && longBiasBarEl && shortBiasBarEl) {
+      const longBias = currentSignal.longBias != null ? currentSignal.longBias : 50;
+      const shortBias = currentSignal.shortBias != null ? currentSignal.shortBias : 50;
+      longBiasValEl.textContent = `${longBias}%`;
+      shortBiasValEl.textContent = `${shortBias}%`;
+      longBiasBarEl.style.width = `${longBias}%`;
+      shortBiasBarEl.style.width = `${shortBias}%`;
+    }
+
+    // Update Scalper Metrics
+    const regimeValEl = document.getElementById("agy-val-regime");
+    const spreadValEl = document.getElementById("agy-val-spread");
+    const htfValEl = document.getElementById("agy-val-htf");
+    const imbalanceValEl = document.getElementById("agy-val-imbalance");
+
+    if (regimeValEl) {
+      const regime = currentSignal.regime || "CHOPPY";
+      regimeValEl.textContent = regime;
+      if (regime === "TRENDING" || regime === "EXPANSION") {
+        regimeValEl.style.color = "#2ebd85";
+      } else if (regime === "CHOPPY" || regime === "HIGH_VOLATILITY" || regime === "LIQUIDATION_CASCADE") {
+        regimeValEl.style.color = "#f6465d";
+      } else if (regime === "COMPRESSION") {
+        regimeValEl.style.color = "#f0b90b";
+      } else {
+        regimeValEl.style.color = "#848e9c";
+      }
+    }
+
+    if (spreadValEl && currentTickPrice > 0) {
+      const spread = currentSignal.spread || 0;
+      const spreadPct = (spread / currentTickPrice) * 100;
+      spreadValEl.textContent = `$${formatPrice(spread)} (${spreadPct.toFixed(3)}%)`;
+      spreadValEl.style.color = spreadPct > 0.05 ? "#f6465d" : "#2ebd85";
+    } else if (spreadValEl) {
+      spreadValEl.textContent = "--";
+    }
+
+    if (htfValEl) {
+      const htfTrend = currentSignal.htfTrend || "WAITING";
+      htfValEl.textContent = htfTrend;
+      if (htfTrend === "BULLISH") htfValEl.style.color = "#2ebd85";
+      else if (htfTrend === "BEARISH") htfValEl.style.color = "#f6465d";
+      else htfValEl.style.color = "#848e9c";
+    }
+
+    if (imbalanceValEl) {
+      const imb = currentSignal.orderbookImbalance != null ? currentSignal.orderbookImbalance : 0.5;
+      imbalanceValEl.textContent = `Bids ${(imb * 100).toFixed(0)}% | Asks ${((1 - imb) * 100).toFixed(0)}%`;
+      imbalanceValEl.style.color = imb > 0.6 ? "#2ebd85" : imb < 0.4 ? "#f6465d" : "#848e9c";
+    }
+
     // Update SMC Indicators text values
     const dispValEl = document.getElementById("agy-val-disp");
     const dispDotEl = document.getElementById("agy-dot-disp");
@@ -637,6 +1084,34 @@
       } else {
         sweepValEl.textContent = "Scanning Liquidity Pools...";
       }
+    }
+
+    // Update Support and Resistance Key Levels
+    const supportValEl = document.getElementById("agy-val-support");
+    const resistanceValEl = document.getElementById("agy-val-resistance");
+
+    if (supportValEl) {
+      const supp = currentSignal.nearestSupport;
+      if (supp) {
+        supportValEl.textContent = `${supp.type}: $${formatPrice(supp.price)}`;
+      } else {
+        supportValEl.textContent = "None Active";
+      }
+    }
+
+    if (resistanceValEl) {
+      const res = currentSignal.nearestResistance;
+      if (res) {
+        resistanceValEl.textContent = `${res.type}: $${formatPrice(res.price)}`;
+      } else {
+        resistanceValEl.textContent = "None Active";
+      }
+    }
+
+    // Trigger Mini SVG Chart Render
+    const svgEl = document.getElementById("agy-svg-chart");
+    if (svgEl) {
+      renderMiniSVGChart(svgEl, candles, currentSignal);
     }
 
     // Update Journal Ledger
@@ -839,12 +1314,124 @@
       `;
     } else {
       badgeEl.textContent = "WAITING";
-      levelsEl.innerHTML = `
-        <div class="agy-lvl-item">
-          <span class="agy-lvl-name">Status</span>
-          <span class="agy-lvl-val" style="color: #848e9c;" id="agy-rec-status">${currentSignal.reason}</span>
-        </div>
-      `;
+      
+      if (settings.enableSMC) {
+        // SMC Checklist Calculations
+        
+        // 1. Sweep check
+        let sweepCheck = `<span style="color: #f6465d;">🔴 Awaiting Sweep</span>`;
+        if (currentSignal.sweptPoolType) {
+          sweepCheck = `<span style="color: #2ebd85;">🟢 Swept ${currentSignal.sweptPoolType} ($${formatPrice(currentSignal.sweptPoolPrice)})</span>`;
+        }
+        
+        // 2. MSS check
+        let mssCheck = `<span style="color: #848e9c;">🔴 Awaiting Sweep</span>`;
+        if (currentSignal.mssPrice) {
+          mssCheck = `<span style="color: #2ebd85;">🟢 MSS Confirmed ($${formatPrice(currentSignal.mssPrice)})</span>`;
+        } else if (currentSignal.pendingMssPrice) {
+          const poolType = currentSignal.sweptPoolType || "";
+          const isLows = poolType.includes("LOW") || poolType.includes("SSL") || poolType.includes("PDL") || poolType.includes("WL") || poolType.includes("EQL") || poolType.includes("SWING_LOW");
+          const mssDir = isLows ? "Break Above" : "Break Below";
+          mssCheck = `<span style="color: #f0b90b;">🔴 Awaiting ${mssDir} $${formatPrice(currentSignal.pendingMssPrice)}</span>`;
+        } else if (currentSignal.sweptPoolType) {
+          mssCheck = `<span style="color: #f6465d;">🔴 Awaiting MSS Break</span>`;
+        }
+        
+        // 3. Displacement
+        let dispCheck = `<span style="color: #848e9c;">🔴 Awaiting MSS</span>`;
+        if (currentSignal.displacementScore != null) {
+          const dScore = currentSignal.displacementScore;
+          if (dScore >= 60) {
+            dispCheck = `<span style="color: #2ebd85;">🟢 Score ${dScore}/100</span>`;
+          } else {
+            dispCheck = `<span style="color: #f6465d;">🔴 Low Score ${dScore}/100</span>`;
+          }
+        }
+        
+        // 4. FVG Mitigation
+        let fvgCheck = `<span style="color: #848e9c;">🔴 Awaiting displacement</span>`;
+        if (currentSignal.fvgTop != null && currentSignal.fvgBottom != null) {
+          const isTouch = currentTickPrice <= currentSignal.fvgTop && currentTickPrice >= currentSignal.fvgBottom;
+          if (isTouch) {
+            fvgCheck = `<span style="color: #2ebd85;">🟢 Inside FVG ($${formatPrice(currentSignal.fvgBottom)}-$${formatPrice(currentSignal.fvgTop)})</span>`;
+          } else {
+            fvgCheck = `<span style="color: #f0b90b;">🔴 Retracement pending ($${formatPrice(currentSignal.fvgBottom)}-$${formatPrice(currentSignal.fvgTop)})</span>`;
+          }
+        } else if (currentSignal.displacementScore != null && currentSignal.displacementScore >= 60) {
+          fvgCheck = `<span style="color: #f6465d;">🔴 Awaiting FVG Creation</span>`;
+        }
+        
+        // 5. Equilibrium
+        let eqCheck = `<span style="color: #848e9c;">🔴 Awaiting range</span>`;
+        if (currentSignal.equilibrium != null) {
+          const poolType = currentSignal.sweptPoolType || "";
+          const isLows = poolType.includes("LOW") || poolType.includes("SSL") || poolType.includes("PDL") || poolType.includes("WL") || poolType.includes("EQL") || poolType.includes("SWING_LOW");
+          const isHighs = poolType.includes("HIGH") || poolType.includes("BSL") || poolType.includes("PDH") || poolType.includes("WH") || poolType.includes("EQH") || poolType.includes("SWING_HIGH");
+          
+          if (isLows) {
+            if (currentTickPrice < currentSignal.equilibrium) {
+              eqCheck = `<span style="color: #2ebd85;">🟢 Discount ($${formatPrice(currentTickPrice)} < $${formatPrice(currentSignal.equilibrium)})</span>`;
+            } else {
+              eqCheck = `<span style="color: #f6465d;">🔴 Premium (Wait for < $${formatPrice(currentSignal.equilibrium)})</span>`;
+            }
+          } else if (isHighs) {
+            if (currentTickPrice > currentSignal.equilibrium) {
+              eqCheck = `<span style="color: #2ebd85;">🟢 Premium ($${formatPrice(currentTickPrice)} > $${formatPrice(currentSignal.equilibrium)})</span>`;
+            } else {
+              eqCheck = `<span style="color: #f6465d;">🔴 Discount (Wait for > $${formatPrice(currentSignal.equilibrium)})</span>`;
+            }
+          } else {
+            eqCheck = `<span style="color: #848e9c;">🔴 Out of Zone</span>`;
+          }
+        }
+        
+        levelsEl.innerHTML = `
+          <div class="agy-lvl-item" style="border-bottom: 1px solid rgba(240, 185, 11, 0.2) !important; padding-bottom: 6px !important; margin-bottom: 6px !important;">
+            <span class="agy-lvl-name" style="color: #f0b90b; font-weight: 800;">PENDING SMC SETUP</span>
+            <span class="agy-lvl-val" style="color: #f0b90b; font-size: 9px;">${currentSignal.reason}</span>
+          </div>
+          <div class="agy-lvl-item">
+            <span class="agy-lvl-name">1. Liquidity Sweep</span>
+            <span class="agy-lvl-val">${sweepCheck}</span>
+          </div>
+          <div class="agy-lvl-item">
+            <span class="agy-lvl-name">2. Market Structure Shift</span>
+            <span class="agy-lvl-val">${mssCheck}</span>
+          </div>
+          <div class="agy-lvl-item">
+            <span class="agy-lvl-name">3. Displacement Quality</span>
+            <span class="agy-lvl-val">${dispCheck}</span>
+          </div>
+          <div class="agy-lvl-item">
+            <span class="agy-lvl-name">4. FVG Mitigation</span>
+            <span class="agy-lvl-val">${fvgCheck}</span>
+          </div>
+          <div class="agy-lvl-item">
+            <span class="agy-lvl-name">5. Equilibrium Zone</span>
+            <span class="agy-lvl-val">${eqCheck}</span>
+          </div>
+        `;
+      } else {
+        // Legacy Indicators Checklist
+        levelsEl.innerHTML = `
+          <div class="agy-lvl-item" style="border-bottom: 1px solid rgba(240, 185, 11, 0.2) !important; padding-bottom: 6px !important; margin-bottom: 6px !important;">
+            <span class="agy-lvl-name" style="color: #f0b90b; font-weight: 800;">PENDING CONFLUENCE</span>
+            <span class="agy-lvl-val" style="color: #f0b90b; font-size: 9px;">${currentSignal.reason}</span>
+          </div>
+          <div class="agy-lvl-item">
+            <span class="agy-lvl-name">Trend Direction</span>
+            <span class="agy-lvl-val" style="color: ${indicators.ema9 > indicators.ema21 ? '#2ebd85' : '#f6465d'};">${indicators.ema9 > indicators.ema21 ? '🟢 Bullish (EMA9 > EMA21)' : '🔴 Bearish (EMA9 < EMA21)'}</span>
+          </div>
+          <div class="agy-lvl-item">
+            <span class="agy-lvl-name">RSI Momentum</span>
+            <span class="agy-lvl-val" style="color: ${indicators.rsi > 70 || indicators.rsi < 30 ? '#f0b90b' : '#848e9c'};">${indicators.rsi > 70 ? '⚠️ Overbought' : indicators.rsi < 30 ? '⚠️ Oversold' : '🟢 Neutral'} (${indicators.rsi})</span>
+          </div>
+          <div class="agy-lvl-item">
+            <span class="agy-lvl-name">Liquidity Sweep</span>
+            <span class="agy-lvl-val">${currentSignal.sweptPoolType ? `🟢 Swept ${currentSignal.sweptPoolType}` : '🔴 Awaiting Sweep'}</span>
+          </div>
+        `;
+      }
     }
   }
 
@@ -876,8 +1463,6 @@
       const pnlSign = pnlPercent >= 0 ? "+" : "";
       const sizeSign = sizePercent >= 0 ? "+" : "";
 
-      const timeoutCandles = settings.enableTimeout !== false ? (settings.timeoutCandles !== undefined ? settings.timeoutCandles : 12) : 12;
-      const timeOpacity = Math.max(0.0, 1 - ((activeTrade.elapsedCandles || 0) / timeoutCandles));
       const initDist = Math.abs(activeTrade.entry - activeTrade.stopLoss);
       const currDist = Math.abs(currentTickPrice - activeTrade.stopLoss);
       let priceOpacity = 1.0;
@@ -886,7 +1471,7 @@
       } else if (activeTrade.direction === "SHORT" && currentTickPrice > activeTrade.entry) {
         priceOpacity = initDist > 0 ? currDist / initDist : 1;
       }
-      const opacity = Math.max(0.15, Math.min(timeOpacity, priceOpacity));
+      const opacity = Math.max(0.15, priceOpacity);
       const decayWarning = opacity < 0.4 ? "color: #f6465d; font-weight: 900;" : "";
 
       let adverseWarningHtml = "";
@@ -1005,7 +1590,6 @@
 
   // --- BOOTSTRAP ---
   loadSettings(() => {
-    injectHUD();
     startPnLTicker();
     startSymbolDetectionLoop();
   });

@@ -408,7 +408,16 @@ function getHUDUpdatePayload(symbol) {
       dealingRangeLow: sData.dealingRangeLow,
       equilibrium: sData.equilibrium,
       primaryTarget: sData.primaryTarget,
-      secondaryTarget: sData.secondaryTarget
+      secondaryTarget: sData.secondaryTarget,
+      longBias: sData.longBias,
+      shortBias: sData.shortBias,
+      regime: sData.regime,
+      spread: sData.spread,
+      orderbookImbalance: sData.orderbookImbalance,
+      htfTrend: sData.htfTrend,
+      pendingMssPrice: sData.pendingMssPrice,
+      nearestSupport: sData.nearestSupport,
+      nearestResistance: sData.nearestResistance
     },
     activeTrade: state.activeTrades[symbol] || null,
     advisorMode: state.activeTrades[symbol] ? "MONITORING" : "HUNTING",
@@ -419,12 +428,12 @@ function getHUDUpdatePayload(symbol) {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("🚀 Antigravity SW Client: Extension installed or reloaded. Refreshing active Binance Futures tabs...");
+  console.log("🚀 Antigravity SW Client: Extension installed or reloaded. Refreshing active Binance tabs...");
   chrome.tabs.query({}, (tabs) => {
     if (chrome.runtime.lastError || !Array.isArray(tabs)) return;
     for (const tab of tabs) {
-      if (tab.url && isBinanceUrl(tab.url) && tab.url.includes("/futures/")) {
-        console.log(`🔄 Auto-reloading Binance futures tab: ${tab.id} to refresh content script`);
+      if (tab.url && isBinanceUrl(tab.url)) {
+        console.log(`🔄 Auto-reloading Binance tab: ${tab.id} to refresh content script`);
         chrome.tabs.reload(tab.id);
       }
     }

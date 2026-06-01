@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Binance Futures Real-Time Advisor",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "description": "Real-time SMC & indicator-based trading HUD overlay for Binance Futures (USDⓈ-M). Zero-GPU, ultra-low latency.",
   "permissions": [
     "storage",
@@ -9,10 +9,15 @@
     "activeTab"
   ],
   "host_permissions": [
+    "https://binance.com/*",
     "https://*.binance.com/*",
+    "https://binance.me/*",
     "https://*.binance.me/*",
+    "https://binance.info/*",
     "https://*.binance.info/*",
+    "https://binancefuture.com/*",
     "https://*.binancefuture.com/*",
+    "https://binance.us/*",
     "https://*.binance.us/*",
     "https://fapi.binance.com/*",
     "https://api.binance.com/*",
@@ -29,20 +34,16 @@
   "content_scripts": [
     {
       "matches": [
-        "https://*.binance.com/en/futures/*",
-        "https://*.binance.com/zh-CN/futures/*",
-        "https://*.binance.com/futures/*",
-        "https://*.binance.me/en/futures/*",
-        "https://*.binance.me/zh-CN/futures/*",
-        "https://*.binance.me/futures/*",
-        "https://*.binance.info/en/futures/*",
-        "https://*.binance.info/zh-CN/futures/*",
-        "https://*.binance.info/futures/*",
-        "https://*.binancefuture.com/en/futures/*",
-        "https://*.binancefuture.com/zh-CN/futures/*",
-        "https://*.binancefuture.com/futures/*",
-        "https://*.binance.us/en/futures/*",
-        "https://*.binance.us/futures/*"
+        "https://binance.com/*",
+        "https://*.binance.com/*",
+        "https://binance.me/*",
+        "https://*.binance.me/*",
+        "https://binance.info/*",
+        "https://*.binance.info/*",
+        "https://binancefuture.com/*",
+        "https://*.binancefuture.com/*",
+        "https://binance.us/*",
+        "https://*.binance.us/*"
       ],
       "js": ["content.js"],
       "css": ["hud.css"],
@@ -52,7 +53,10 @@
   "web_accessible_resources": [
     {
       "resources": ["hud.css"],
-      "matches": ["https://*.binance.com/*"]
+      "matches": [
+        "https://binance.com/*",
+        "https://*.binance.com/*"
+      ]
     }
   ]
 }

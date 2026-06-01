@@ -1,21 +1,22 @@
 /* Antigravity Advisor HUD Injected Styling */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&family=Outfit:wght@400;600;800;900&display=swap');
 
 #antigravity-hud-root {
   all: initial; /* Reset browser styles */
   position: fixed;
   top: 70px;
   right: 20px;
-  width: 400px;
-  background: rgba(11, 14, 17, 0.85) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  border: 1px solid rgba(240, 185, 11, 0.25) !important;
+  width: 320px !important;
+  background: rgba(10, 12, 16, 0.8) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1px solid rgba(240, 185, 11, 0.2) !important;
   border-radius: 12px !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 15px rgba(240, 185, 11, 0.1) !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(240, 185, 11, 0.12) !important;
   color: #eaecef !important;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, sans-serif !important;
+  font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
   z-index: 9999999 !important;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1) !important;
   overflow: hidden !important;
 }
 
@@ -170,6 +171,8 @@
 .agy-body {
   padding: 14px !important;
   box-sizing: border-box !important;
+  max-height: 380px !important;
+  overflow-y: auto !important;
 }
 
 /* Gauge Meter */
@@ -457,4 +460,92 @@
 .agy-flash-alert.bearish {
   animation: agy-flash-sell 1.2s infinite !important;
 }
+
+.agy-bias-section {
+  margin-bottom: 14px !important;
+  padding: 0 5px !important;
+}
+
+.agy-bias-bar-wrapper {
+  height: 6px !important;
+  background: #2b3139 !important;
+  border-radius: 3px !important;
+  overflow: hidden !important;
+  display: flex !important;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5) !important;
+}
+
+#agy-long-bias-bar {
+  width: 50%;
+  background: #2ebd85 !important;
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+#agy-short-bias-bar {
+  width: 50%;
+  background: #f6465d !important;
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* Navigation Tabs Bar */
+.agy-tabs-nav {
+  display: flex !important;
+  background: rgba(20, 24, 30, 0.6) !important;
+  border-bottom: 1px solid rgba(43, 49, 57, 0.6) !important;
+  position: relative !important;
+  width: 100% !important;
+}
+
+.agy-tab-btn {
+  flex: 1 !important;
+  background: transparent !important;
+  border: none !important;
+  color: #848e9c !important;
+  padding: 8px 0 !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+  cursor: pointer !important;
+  transition: color 0.25s ease !important;
+  position: relative !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  font-family: inherit !important;
+}
+
+.agy-tab-btn:hover {
+  color: #fff !important;
+}
+
+.agy-tab-btn.active {
+  color: #f0b90b !important;
+}
+
+/* Sliding active indicator line */
+.agy-tabs-nav::after {
+  content: "" !important;
+  position: absolute !important;
+  bottom: 0 !important;
+  left: var(--agy-tab-left, 0%) !important;
+  width: 33.333% !important;
+  height: 2px !important;
+  background: #f0b90b !important;
+  box-shadow: 0 0 8px #f0b90b !important;
+  transition: left 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* Tab Panels Transitions */
+.agy-tab-content {
+  display: none;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.agy-tab-content.active {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+
 

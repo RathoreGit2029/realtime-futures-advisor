@@ -71,9 +71,9 @@ fastify.get('/api/advisor/events', async (req: any, reply) => {
       eventId: e.eventId,
       correlationId: e.correlationId,
       type: e.type,
-      payload: JSON.parse(e.payload),
-      marketContextSnapshot: e.marketContextSnapshot ? JSON.parse(e.marketContextSnapshot) : undefined,
-      decisionMetadata: e.decisionMetadata ? JSON.parse(e.decisionMetadata) : undefined,
+      payload: e.payload,
+      marketContextSnapshot: e.marketContextSnapshot || undefined,
+      decisionMetadata: e.decisionMetadata || undefined,
       eventVersion: e.eventVersion,
       previousEventHash: e.previousEventHash || undefined,
       deterministicHash: e.deterministicHash
@@ -132,9 +132,9 @@ fastify.post('/api/advisor/events', async (req: any, reply) => {
         eventId: event.eventId,
         correlationId: event.correlationId,
         type: event.type,
-        payload: JSON.stringify(event.payload),
-        marketContextSnapshot: event.marketContextSnapshot ? JSON.stringify(event.marketContextSnapshot) : null,
-        decisionMetadata: event.decisionMetadata ? JSON.stringify(event.decisionMetadata) : null,
+        payload: event.payload,
+        marketContextSnapshot: event.marketContextSnapshot || null,
+        decisionMetadata: event.decisionMetadata || null,
         eventVersion: event.eventVersion,
         previousEventHash: event.previousEventHash || null,
         deterministicHash: event.deterministicHash
@@ -164,13 +164,13 @@ fastify.post('/api/advisor/snapshots', async (req: any, reply) => {
     await db.insert(advisorSnapshots)
       .values({
         sequenceNumber,
-        stateData: JSON.stringify(stateData),
+        stateData: stateData,
         timestamp: timestamp || Date.now()
       })
       .onConflictDoUpdate({
         target: advisorSnapshots.sequenceNumber,
         set: {
-          stateData: JSON.stringify(stateData),
+          stateData: stateData,
           timestamp: timestamp || Date.now()
         }
       })
@@ -198,7 +198,7 @@ fastify.get('/api/advisor/snapshots/latest', async (_req, reply) => {
 
     return {
       sequenceNumber: snapshot.sequenceNumber,
-      stateData: JSON.parse(snapshot.stateData),
+      stateData: snapshot.stateData,
       timestamp: snapshot.timestamp
     };
   } catch (err) {
@@ -384,12 +384,6 @@ const start = async () => {
       UPDATE advisor_signals
       SET status = CASE WHEN status = 'SANDBOX_ACTIVE' THEN 'SANDBOX_TIMEOUT' ELSE 'TIMEOUT' END,
           resolved_at = NOW()
-      WHERE status IN ('ACTIVE', 'SANDBOX_ACTIVE')
-    `);
-
-    await db.execute(sql`
-      CREATE UNIQUE INDEX IF NOT EXISTS unique_active_symbol
-      ON advisor_signals (symbol)
       WHERE status IN ('ACTIVE', 'SANDBOX_ACTIVE')
     `);
 

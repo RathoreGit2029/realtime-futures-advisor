@@ -1,4 +1,5 @@
-import { pgTable, uuid, varchar, integer, decimal, timestamp, boolean, bigint, text } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, integer, decimal, timestamp, boolean, bigint, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 /** Signals persisted from the Binance Futures Real-Time Advisor Chrome extension. */
 export const advisorSignals = pgTable('advisor_signals', {
@@ -34,27 +35,39 @@ export const advisorSignals = pgTable('advisor_signals', {
   triggerCatalyst: varchar('trigger_catalyst', { length: 2000 }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   resolvedAt: timestamp('resolved_at', { withTimezone: true })
+}, (table) => {
+  return {
+    createdAtIdx: index('idx_signals_created_at').on(table.createdAt),
+    uniqueActiveSymbol: uniqueIndex('unique_active_symbol')
+      .on(table.symbol)
+      .where(sql`status IN ('ACTIVE', 'SANDBOX_ACTIVE')`)
+  };
 });
 
 /** Authoritative Event Sourcing Log */
 export const advisorEvents = pgTable('advisor_events', {
-  sequenceNumber: integer('sequence_number').primaryKey(),
+  sequenceNumber: bigint('sequence_number', { mode: 'number' }).primaryKey(),
   exchangeTimestamp: bigint('exchange_timestamp', { mode: 'number' }).notNull(),
   receiveTimestamp: bigint('receive_timestamp', { mode: 'number' }).notNull(),
   eventId: varchar('event_id', { length: 255 }).notNull(),
   correlationId: varchar('correlation_id', { length: 255 }).notNull(),
   type: varchar('type', { length: 100 }).notNull(),
-  payload: text('payload').notNull(),
-  marketContextSnapshot: text('market_context_snapshot'),
-  decisionMetadata: text('decision_metadata'),
+  payload: jsonb('payload').notNull(),
+  marketContextSnapshot: jsonb('market_context_snapshot'),
+  decisionMetadata: jsonb('decision_metadata'),
   eventVersion: integer('event_version').notNull(),
   previousEventHash: varchar('previous_event_hash', { length: 255 }),
   deterministicHash: varchar('deterministic_hash', { length: 255 }).notNull()
+}, (table) => {
+  return {
+    typeSequenceIdx: index('idx_events_type_seq').on(table.type, table.sequenceNumber),
+    correlationIdx: index('idx_events_correlation').on(table.correlationId)
+  };
 });
 
 /** Event Sourcing State Checkpoint Snapshots */
 export const advisorSnapshots = pgTable('advisor_snapshots', {
-  sequenceNumber: integer('sequence_number').primaryKey(),
-  stateData: text('state_data').notNull(),
+  sequenceNumber: bigint('sequence_number', { mode: 'number' }).primaryKey(),
+  stateData: jsonb('state_data').notNull(),
   timestamp: bigint('timestamp', { mode: 'number' }).notNull()
 });

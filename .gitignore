@@ -2,3 +2,8 @@ node_modules/
 realtime-advisor-backend/node_modules/
 .DS_Store
 realtime-advisor-backend/events.db*
+
+# Build outputs and generated assets
+dist/
+realtime-advisor-backend/dist/
+background.js

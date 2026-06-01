@@ -119,6 +119,11 @@ export interface SymbolState {
   spread: number;
   orderbookDepth: number;
   orderbookImbalance: number; // 0 to 1
+
+  // Scalper / Bias Metrics
+  longBias?: number;
+  shortBias?: number;
+  pendingMssPrice?: number | null;
 }
 
 export class BinanceWebSocketManager {
@@ -166,6 +171,7 @@ export class BinanceWebSocketManager {
   
   private engine!: AntigravityEngine;
   private isHydrated = false;
+  private executingTrades: Set<string> = new Set();
 
   private constructor() {
     // Registered on initialization in server.ts
@@ -228,7 +234,7 @@ export class BinanceWebSocketManager {
         });
     });
 
-    logger.registerHydrationHandler(async () => {
+    logger.registerHydrationHandler(async (_startSeq: number): Promise<any> => {
       // 1. Fetch latest snapshot
       const snapshots = await db.select()
         .from(advisorSnapshots)
@@ -240,7 +246,7 @@ export class BinanceWebSocketManager {
       let snapshotState = null;
       if (snapshot) {
         startSeq = snapshot.sequenceNumber + 1;
-        snapshotState = JSON.parse(snapshot.stateData);
+        snapshotState = snapshot.stateData;
       }
       
       // 2. Fetch subsequent events
@@ -257,9 +263,9 @@ export class BinanceWebSocketManager {
         eventId: e.eventId,
         correlationId: e.correlationId,
         type: e.type,
-        payload: JSON.parse(e.payload),
-        marketContextSnapshot: e.marketContextSnapshot ? JSON.parse(e.marketContextSnapshot) : undefined,
-        decisionMetadata: e.decisionMetadata ? JSON.parse(e.decisionMetadata) : undefined,
+        payload: e.payload as any,
+        marketContextSnapshot: e.marketContextSnapshot as any,
+        decisionMetadata: e.decisionMetadata as any,
         eventVersion: e.eventVersion,
         previousEventHash: e.previousEventHash || undefined,
         deterministicHash: e.deterministicHash
@@ -636,10 +642,6 @@ export class BinanceWebSocketManager {
               activeTrade.elapsedCandles = Math.round(
                 (candleTime - activeTrade.triggerTime) / this.timeframeToMs(activeTrade.timeframe || this.state.settings.timeframe)
               );
-              const limit = this.state.settings.timeoutCandles !== undefined ? this.state.settings.timeoutCandles : 12;
-              if (activeTrade.elapsedCandles >= limit) {
-                this.resolveActiveTrade(symbol, "TIMEOUT");
-              }
             }
 
             // Recalculate correlation matrix on closed candle boundary
@@ -860,6 +862,137 @@ export class BinanceWebSocketManager {
         sData.lastDealingRange = calculateDealingRange(sData.lastSweep.sweepPrice, sData.lastSweep.direction, sData.candles);
       }
     }
+
+    // Calculate pending MSS trigger price if swept but not shifted
+    sData.pendingMssPrice = null;
+    if (sData.lastSweep && !sData.lastMSS) {
+      const sweep = sData.lastSweep;
+      const sweepIndex = sweep.candleIndex;
+      const len = sData.candles.length;
+      const lookbackStart = Math.max(0, sweepIndex - 15);
+      if (sweep.direction === "LONG") {
+        let highestHigh = -Infinity;
+        for (let i = sweepIndex; i >= lookbackStart; i--) {
+          if (i > 0 && i < len - 1) {
+            const c = sData.candles[i];
+            if (c.high > sData.candles[i-1].high && c.high > sData.candles[i+1].high) {
+              if (c.high > highestHigh) highestHigh = c.high;
+            }
+          }
+        }
+        if (highestHigh === -Infinity) {
+          const recentHighs = sData.candles.slice(Math.max(0, sweepIndex - 5), sweepIndex).map(c => c.high);
+          highestHigh = Math.max(...recentHighs, sData.candles[sweepIndex].high);
+        }
+        sData.pendingMssPrice = highestHigh;
+      } else {
+        let lowestLow = Infinity;
+        for (let i = sweepIndex; i >= lookbackStart; i--) {
+          if (i > 0 && i < len - 1) {
+            const c = sData.candles[i];
+            if (c.low < sData.candles[i-1].low && c.low < sData.candles[i+1].low) {
+              if (c.low < lowestLow) lowestLow = c.low;
+            }
+          }
+        }
+        if (lowestLow === Infinity) {
+          const recentLows = sData.candles.slice(Math.max(0, sweepIndex - 5), sweepIndex).map(c => c.low);
+          lowestLow = Math.min(...recentLows, sData.candles[sweepIndex].low);
+        }
+        sData.pendingMssPrice = lowestLow;
+      }
+    }
+
+    // Multi-factor Bullish / Bearish Bias scoring
+    let longScore = 0;
+    let shortScore = 0;
+
+    // 1. Trend Direction (EMA 9/21 comparison) - Max 20 points
+    if (trendDir === 'UP') {
+      longScore += 20;
+    } else if (trendDir === 'DOWN') {
+      shortScore += 20;
+    } else {
+      longScore += 10;
+      shortScore += 10;
+    }
+
+    // 2. HTF (15m/1h) Alignment - Max 20 points
+    if (htfDataReady) {
+      const isBullishHTF = curClose > sData.ema21_15m! && curClose > sData.ema21_1h!;
+      const isBearishHTF = curClose < sData.ema21_15m! && curClose < sData.ema21_1h!;
+      if (isBullishHTF) {
+        longScore += 20;
+      } else if (isBearishHTF) {
+        shortScore += 20;
+      } else {
+        longScore += 10;
+        shortScore += 10;
+      }
+    } else {
+      longScore += 10;
+      shortScore += 10;
+    }
+
+    // 3. Liquidity Sweep - Max 25 points
+    let calcRecentSweepDir: 'BULLISH' | 'BEARISH' | null = null;
+    if (this.state.settings.enableSMC) {
+      if (sData.lastSweep) {
+        calcRecentSweepDir = sData.lastSweep.direction === 'LONG' ? 'BULLISH' : 'BEARISH';
+      }
+    } else {
+      calcRecentSweepDir = legacySweeps.bullishSweep ? 'BULLISH' : legacySweeps.bearishSweep ? 'BEARISH' : null;
+    }
+
+    if (calcRecentSweepDir === 'BULLISH') {
+      longScore += 25; // Swept lows, institutional accumulation -> bullish
+    } else if (calcRecentSweepDir === 'BEARISH') {
+      shortScore += 25; // Swept highs, institutional distribution -> bearish
+    } else {
+      longScore += 12.5;
+      shortScore += 12.5;
+    }
+
+    // 4. Order Blocks (Unmitigated) - Max 15 points
+    const unmitBullishOBs = orderBlocks.bullish.filter(ob => ob.unmitigated).length;
+    const unmitBearishOBs = orderBlocks.bearish.filter(ob => ob.unmitigated).length;
+    const totOBs = unmitBullishOBs + unmitBearishOBs;
+    if (totOBs > 0) {
+      longScore += 15 * (unmitBullishOBs / totOBs);
+      shortScore += 15 * (unmitBearishOBs / totOBs);
+    } else {
+      longScore += 7.5;
+      shortScore += 7.5;
+    }
+
+    // 5. Dealing Range & Equilibrium - Max 10 points
+    if (sData.lastDealingRange) {
+      const isDiscount = curClose < sData.lastDealingRange.equilibrium;
+      if (isDiscount) {
+        longScore += 10;
+      } else {
+        shortScore += 10;
+      }
+    } else {
+      longScore += 5;
+      shortScore += 5;
+    }
+
+    // 6. RSI Momentum - Max 10 points
+    if (curRsi > 50) {
+      const factor = Math.min(1, (curRsi - 50) / 20);
+      longScore += 5 + 5 * factor;
+      shortScore += 5 - 5 * factor;
+    } else {
+      const factor = Math.min(1, (50 - curRsi) / 20);
+      shortScore += 5 + 5 * factor;
+      longScore += 5 - 5 * factor;
+    }
+
+    // Normalize to exact percentages (summing to 100%)
+    const totalScore = longScore + shortScore;
+    sData.longBias = totalScore > 0 ? Math.round((longScore / totalScore) * 100) : 50;
+    sData.shortBias = 100 - sData.longBias;
 
     let activeFVG: FVGRegistryItem | null = null;
 
@@ -1221,122 +1354,132 @@ export class BinanceWebSocketManager {
     symbol: string, direction: 'LONG' | 'SHORT', signal: any, probability: number,
     patternName: string, curClose: number, curRsi: number, curEma9: number, curEma21: number, orderBlocks: any, ctx: MarketContext
   ) {
-    const stopLoss = signal.stopLoss;
-    const entry = signal.entry || curClose;
-    
-    // Position Calculations with Quarter-Kelly sizing
-    const walletBalance = this.state.settings.sandboxMode ? this.state.sandboxWalletBalance : this.state.walletBalance;
-    const p = probability / 100;
-    const riskPerUnit = Math.abs(entry - stopLoss);
-    
-    let R = 1.5;
-    if (riskPerUnit > 0) {
-      R = Math.abs(signal.target1 - entry) / riskPerUnit;
+    if (this.executingTrades.has(symbol)) {
+      console.log(`⚠️ Autopilot execution already in-flight for ${symbol}. Ignoring concurrent tick execution.`);
+      return;
     }
-    
-    // Fractional Kelly Sizing formula: f* = 0.25 * (p * R - (1 - p)) / R
-    const rawKelly = R > 0 ? 0.25 * ((p * R - (1 - p)) / R) : 0.025;
-    const clampedKelly = Math.max(0.01, Math.min(0.10, rawKelly)); // Clamped to 1% - 10%
-    
-    const riskAmount = walletBalance * clampedKelly;
-    const positionSize = riskPerUnit > 0 ? riskAmount / riskPerUnit : 0;
-    if (positionSize <= 0) return;
-
-    const leverage = this.state.settings.leverage || 3;
-    const marginRequired = (positionSize * entry) / leverage;
-
-    const newTrade: ActiveTrade = {
-      symbol,
-      direction,
-      entry,
-      stopLoss,
-      target1: signal.target1,
-      target2: signal.target2,
-      leverage,
-      positionSize,
-      marginRequired,
-      riskAmount,
-      probability,
-      patternName,
-      status: this.state.settings.sandboxMode ? "SANDBOX_ACTIVE" : "ACTIVE",
-      actualOutcome: this.state.settings.sandboxMode ? "SANDBOX" : null,
-      triggerTime: ctx.timestamp,
-      elapsedCandles: 0,
-      timeframe: this.state.settings.timeframe,
-      triggerCatalyst: signal.triggerCatalyst || "",
-      displacementScore: ctx.displacementScore ?? null,
-      sweptPoolType: ctx.sweptPoolType ?? null,
-      sweptPoolPrice: ctx.sweptPoolPrice != null ? String(ctx.sweptPoolPrice) : null,
-      mssPrice: ctx.mssPrice != null ? String(ctx.mssPrice) : null,
-      fvgTop: ctx.fvgTop != null ? String(ctx.fvgTop) : null,
-      fvgBottom: ctx.fvgBottom != null ? String(ctx.fvgBottom) : null,
-      dealingRangeHigh: ctx.dealingRangeHigh != null ? String(ctx.dealingRangeHigh) : null,
-      dealingRangeLow: ctx.dealingRangeLow != null ? String(ctx.dealingRangeLow) : null,
-      equilibrium: ctx.equilibrium != null ? String(ctx.equilibrium) : null
-    };
+    this.executingTrades.add(symbol);
 
     try {
-      // 1. Insert into PostgreSQL ledger
-      const [dbSignal] = await db.insert(advisorSignals).values({
-        symbol: newTrade.symbol,
-        direction: newTrade.direction,
-        entryPrice: String(newTrade.entry),
-        stopLoss: String(newTrade.stopLoss),
-        primaryTarget: String(newTrade.target1),
-        secondaryTarget: newTrade.target2 != null ? String(newTrade.target2) : null,
-        positionSize: String(newTrade.positionSize),
-        marginRequired: String(newTrade.marginRequired),
-        leverage: Number(newTrade.leverage),
-        riskAmount: String(newTrade.riskAmount),
-        probability: Number(newTrade.probability),
-        patternName: newTrade.patternName,
-        displacementScore: newTrade.displacementScore ?? null,
-        sweptPoolType: newTrade.sweptPoolType ?? null,
-        sweptPoolPrice: newTrade.sweptPoolPrice ?? null,
-        mssPrice: newTrade.mssPrice ?? null,
-        fvgTop: newTrade.fvgTop ?? null,
-        fvgBottom: newTrade.fvgBottom ?? null,
-        dealingRangeHigh: newTrade.dealingRangeHigh ?? null,
-        dealingRangeLow: newTrade.dealingRangeLow ?? null,
-        equilibrium: newTrade.equilibrium ?? null,
-        status: newTrade.status,
-        hypotheticalOutcome: newTrade.status,
-        actualOutcome: newTrade.actualOutcome,
-        triggerCatalyst: newTrade.triggerCatalyst,
-        timeframe: newTrade.timeframe
-      }).returning();
+      const stopLoss = signal.stopLoss;
+      const entry = signal.entry || curClose;
+      
+      // Position Calculations with Quarter-Kelly sizing
+      const walletBalance = this.state.settings.sandboxMode ? this.state.sandboxWalletBalance : this.state.walletBalance;
+      const p = probability / 100;
+      const riskPerUnit = Math.abs(entry - stopLoss);
+      
+      let R = 1.5;
+      if (riskPerUnit > 0) {
+        R = Math.abs(signal.target1 - entry) / riskPerUnit;
+      }
+      
+      // Fractional Kelly Sizing formula: f* = 0.25 * (p * R - (1 - p)) / R
+      const rawKelly = R > 0 ? 0.25 * ((p * R - (1 - p)) / R) : 0.025;
+      const clampedKelly = Math.max(0.01, Math.min(0.10, rawKelly)); // Clamped to 1% - 10%
+      
+      const riskAmount = walletBalance * clampedKelly;
+      const positionSize = riskPerUnit > 0 ? riskAmount / riskPerUnit : 0;
+      if (positionSize <= 0) return;
 
-      newTrade.dbId = dbSignal.id;
-      this.state.activeTrades[symbol] = newTrade;
-      console.log(`🚀 Systematic execution triggered for ${symbol}: ${direction} at ${entry} [Postgres ID: ${dbSignal.id}]`);
+      const leverage = this.state.settings.leverage || 3;
+      const marginRequired = (positionSize * entry) / leverage;
 
-      // Log event
-      EventLog.getInstance().append({
-        type: 'TradeExecutionTriggered',
-        correlationId: symbol,
-        payload: {
-          direction,
-          entry,
-          stopLoss,
-          target1: signal.target1,
-          dbId: dbSignal.id
-        },
-        marketContextSnapshot: ctx
-      });
-
-      // Broadcast changes to active trades to extension
-      this.broadcast({
-        type: 'ACTIVE_TRADES_UPDATED',
-        activeTrades: this.state.activeTrades
-      });
-
-      this.broadcast({
-        type: 'TRADE_TRIGGERED',
+      const newTrade: ActiveTrade = {
         symbol,
-        trade: newTrade
-      });
-    } catch (e: any) {
-      console.error('❌ Failed to persist execution signal to PostgreSQL:', e.message);
+        direction,
+        entry,
+        stopLoss,
+        target1: signal.target1,
+        target2: signal.target2,
+        leverage,
+        positionSize,
+        marginRequired,
+        riskAmount,
+        probability,
+        patternName,
+        status: this.state.settings.sandboxMode ? "SANDBOX_ACTIVE" : "ACTIVE",
+        actualOutcome: this.state.settings.sandboxMode ? "SANDBOX" : null,
+        triggerTime: ctx.timestamp,
+        elapsedCandles: 0,
+        timeframe: this.state.settings.timeframe,
+        triggerCatalyst: signal.triggerCatalyst || "",
+        displacementScore: ctx.displacementScore ?? null,
+        sweptPoolType: ctx.sweptPoolType ?? null,
+        sweptPoolPrice: ctx.sweptPoolPrice != null ? String(ctx.sweptPoolPrice) : null,
+        mssPrice: ctx.mssPrice != null ? String(ctx.mssPrice) : null,
+        fvgTop: ctx.fvgTop != null ? String(ctx.fvgTop) : null,
+        fvgBottom: ctx.fvgBottom != null ? String(ctx.fvgBottom) : null,
+        dealingRangeHigh: ctx.dealingRangeHigh != null ? String(ctx.dealingRangeHigh) : null,
+        dealingRangeLow: ctx.dealingRangeLow != null ? String(ctx.dealingRangeLow) : null,
+        equilibrium: ctx.equilibrium != null ? String(ctx.equilibrium) : null
+      };
+
+      try {
+        // 1. Insert into PostgreSQL ledger
+        const [dbSignal] = await db.insert(advisorSignals).values({
+          symbol: newTrade.symbol,
+          direction: newTrade.direction,
+          entryPrice: String(newTrade.entry),
+          stopLoss: String(newTrade.stopLoss),
+          primaryTarget: String(newTrade.target1),
+          secondaryTarget: newTrade.target2 != null ? String(newTrade.target2) : null,
+          positionSize: String(newTrade.positionSize),
+          marginRequired: String(newTrade.marginRequired),
+          leverage: Number(newTrade.leverage),
+          riskAmount: String(newTrade.riskAmount),
+          probability: Number(newTrade.probability),
+          patternName: newTrade.patternName,
+          displacementScore: newTrade.displacementScore ?? null,
+          sweptPoolType: newTrade.sweptPoolType ?? null,
+          sweptPoolPrice: newTrade.sweptPoolPrice ?? null,
+          mssPrice: newTrade.mssPrice ?? null,
+          fvgTop: newTrade.fvgTop ?? null,
+          fvgBottom: newTrade.fvgBottom ?? null,
+          dealingRangeHigh: newTrade.dealingRangeHigh ?? null,
+          dealingRangeLow: newTrade.dealingRangeLow ?? null,
+          equilibrium: newTrade.equilibrium ?? null,
+          status: newTrade.status,
+          hypotheticalOutcome: newTrade.status,
+          actualOutcome: newTrade.actualOutcome,
+          triggerCatalyst: newTrade.triggerCatalyst,
+          timeframe: newTrade.timeframe
+        }).returning();
+
+        newTrade.dbId = dbSignal.id;
+        this.state.activeTrades[symbol] = newTrade;
+        console.log(`🚀 Systematic execution triggered for ${symbol}: ${direction} at ${entry} [Postgres ID: ${dbSignal.id}]`);
+
+        // Log event
+        EventLog.getInstance().append({
+          type: 'TradeExecutionTriggered',
+          correlationId: symbol,
+          payload: {
+            direction,
+            entry,
+            stopLoss,
+            target1: signal.target1,
+            dbId: dbSignal.id
+          },
+          marketContextSnapshot: ctx
+        });
+
+        // Broadcast changes to active trades to extension
+        this.broadcast({
+          type: 'ACTIVE_TRADES_UPDATED',
+          activeTrades: this.state.activeTrades
+        });
+
+        this.broadcast({
+          type: 'TRADE_TRIGGERED',
+          symbol,
+          trade: newTrade
+        });
+      } catch (e: any) {
+        console.error('❌ Failed to persist execution signal to PostgreSQL:', e.message);
+      }
+    } finally {
+      this.executingTrades.delete(symbol);
     }
   }
 
@@ -1495,6 +1638,33 @@ export class BinanceWebSocketManager {
     const activeFVGs = sData.fvgRegistry.filter(f => f.mitigationPercent < 100);
     const activeFVG = activeFVGs.length > 0 ? activeFVGs[activeFVGs.length - 1] : null;
 
+    const htfDataReady = sData.ema21_15m !== null && sData.ema21_1h !== null;
+    const curClose = sData.currentTickPrice;
+
+    // Nearest Support & Resistance from active liquidity pools
+    let nearestSupport = null;
+    let nearestResistance = null;
+    
+    if (sData.liquidityPools) {
+      const activePools = sData.liquidityPools.filter(p => p.status === "ACTIVE");
+      
+      // Support levels (SSL) below current price
+      const supportPools = activePools
+        .filter(p => p.levelType === "SSL" && p.price < curClose)
+        .sort((a, b) => b.price - a.price); // Closest to current price first (descending)
+      if (supportPools.length > 0) {
+        nearestSupport = { type: supportPools[0].type, price: supportPools[0].price };
+      }
+      
+      // Resistance levels (BSL) above current price
+      const resistancePools = activePools
+        .filter(p => p.levelType === "BSL" && p.price > curClose)
+        .sort((a, b) => a.price - b.price); // Closest to current price first (ascending)
+      if (resistancePools.length > 0) {
+        nearestResistance = { type: resistancePools[0].type, price: resistancePools[0].price };
+      }
+    }
+
     return {
       symbol: symbol,
       direction: sData.currentSignal ? sData.currentSignal.direction : "WAITING",
@@ -1525,7 +1695,20 @@ export class BinanceWebSocketManager {
       secondaryTarget: sData.currentSignal ? (sData.currentSignal.target2 || sData.currentSignal.secondaryTarget || null) : null,
       reason: sData.currentSignal ? (sData.currentSignal.reason || null) : null,
       triggerCatalyst: sData.currentSignal ? (sData.currentSignal.triggerCatalyst || null) : null,
-      lastUpdated: Date.now()
+      lastUpdated: Date.now(),
+      
+      // Bias & Scalper Metrics
+      longBias: sData.longBias != null ? sData.longBias : 50,
+      shortBias: sData.shortBias != null ? sData.shortBias : 50,
+      regime: sData.lastRegime || null,
+      spread: sData.spread || 0,
+      orderbookImbalance: sData.orderbookImbalance != null ? sData.orderbookImbalance : 0.5,
+      htfTrend: htfDataReady
+        ? (curClose > sData.ema21_15m! && curClose > sData.ema21_1h! ? "BULLISH" : (curClose < sData.ema21_15m! && curClose < sData.ema21_1h! ? "BEARISH" : "MIXED"))
+        : "WAITING",
+      pendingMssPrice: sData.pendingMssPrice || null,
+      nearestSupport,
+      nearestResistance
     };
   }
 
